@@ -169,7 +169,7 @@ class TestPartnership:
         )
         assert isinstance(obs, BoardroomObservation)
 
-    def test_partnership_recorded_when_accepted(self):
+    def test_partnership_attempt_no_crash(self):
         """Force both sides to propose so acceptance is guaranteed (mutual proposal)."""
         env = make_env()
         target = RIVAL_NAMES[1]
@@ -466,8 +466,8 @@ class TestProposeMerger:
         env.step(BoardroomAction(action_type="PROPOSE_MERGER", action_target=RIVAL_NAMES[0]))
         assert env._companies[PRIMARY].reputation < start_rep
 
-    def test_one_sided_merger_boosts_target(self):
-        """One-sided hostile attempt should give the target a market-share boost."""
+    def test_one_sided_merger_deducts_proposer_share(self):
+        """One-sided hostile attempt should deduct market share from the proposer."""
         from server.game_logic import TurnAction
 
         env = make_env()
@@ -477,6 +477,6 @@ class TestProposeMerger:
         )
 
         target_name = RIVAL_NAMES[0]
-        pre_share = env._companies[target_name].market_share
+        pre_share = env._companies[PRIMARY].market_share
         env.step(BoardroomAction(action_type="PROPOSE_MERGER", action_target=target_name))
-        assert env._companies[target_name].market_share > pre_share
+        assert env._companies[PRIMARY].market_share < pre_share

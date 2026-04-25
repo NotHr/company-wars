@@ -8,9 +8,10 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from server.boardroom_environment import BoardroomEnvironment
+from server.companies import L2_COMPANIES
 from models import BoardroomAction
 
-COMPANIES = ["Goldspire Industries", "Sablemark Holdings", "Ironhold Logistics"]
+COMPANIES = [c["name"] for c in L2_COMPANIES if c["name"] != "Vermillion Capital"]
 ACTION_TYPES = ["EARNINGS_CALL", "SABOTAGE", "PARTNERSHIP", "PROPOSE_MERGER", "HOLD"]
 
 rng = random.Random(42)
