@@ -668,7 +668,18 @@ def collect_prompts(n_episodes: int) -> List[str]:
 
 def build_hf_dataset(prompts: List[str]):
     from datasets import Dataset
-    return Dataset.from_list([{"prompt": p} for p in prompts])
+    # GRPOTrainer applies the chat template when prompt is a list of messages.
+    # Raw strings bypass the chat template → instruction-tuned model outputs nothing.
+    records = [
+        {
+            "prompt": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user",   "content": p},
+            ]
+        }
+        for p in prompts
+    ]
+    return Dataset.from_list(records)
 
 
 # ------------------------------------------------------------------ #
@@ -841,18 +852,8 @@ def main():
     def patched_step(*a, **kw):
         loss = original_step(*a, **kw)
         step_counter[0] += 1
-        try:
-            import wandb
-            if wandb.run:
-                log = {"train/loss": float(loss), "train/step": step_counter[0]}
-                if trainer.state.log_history:
-                    last = trainer.state.log_history[-1]
-                    if "reward" in last:
-                        log["train/reward"] = last["reward"]
-                wandb.log(log, step=step_counter[0])
-        except Exception:
-            pass
-        if step_counter[0] % args.refresh_every == 0:
+        # Dataset refresh — TRL handles all W&B logging via report_to="wandb"
+        if step_counter[0] % (args.refresh_every * 2) == 0:
             print(f"\n[refresh] step {step_counter[0]} — re-rolling dataset ...")
             new_prompts = collect_prompts(args.n_rollout_episodes // 2)
             trainer.train_dataset = build_hf_dataset(new_prompts)
