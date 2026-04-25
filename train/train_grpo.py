@@ -1,15 +1,29 @@
+# /// script
+# requires-python = ">=3.10"
+# dependencies = [
+#   "torch>=2.1.0",
+#   "transformers>=4.45.0",
+#   "trl>=0.12.0",
+#   "peft>=0.13.0",
+#   "accelerate>=0.34.0",
+#   "datasets>=3.0.0",
+#   "bitsandbytes>=0.44.0",
+#   "wandb>=0.18.0",
+#   "matplotlib>=3.8.0",
+#   "openenv-core[core]>=0.2.2",
+#   "unsloth",
+# ]
+# ///
 """
 BOARDROOM — GRPO Training Script
 
 Environment runs in-process (no HTTP server needed).
 
 HF Jobs A10G (recommended — bf16, fastest):
-    hf jobs run --flavor a10g-small \
-        python train/train_grpo.py --model-id Qwen/Qwen3.5-0.8B
+    hf jobs uv run --flavor a10g-small train/train_grpo.py --model-id Qwen/Qwen3.5-0.8B
 
 HF Jobs T4:
-    hf jobs run --flavor t4-medium \
-        python train/train_grpo.py --model-id Qwen/Qwen3.5-0.8B --fp16
+    hf jobs uv run --flavor t4-medium train/train_grpo.py --model-id Qwen/Qwen3.5-0.8B --fp16
 """
 
 import argparse
