@@ -57,7 +57,5 @@ L2_STARTING_STATS = {
     "reputation": 0.70,
 }
 
-STARTING_STATS = L2_STARTING_STATS  # backward compat
-
 # Used by game_logic formulas that normalise against starting share.
 MARKET_SHARE_BASELINE: float = L2_STARTING_STATS["market_share"]

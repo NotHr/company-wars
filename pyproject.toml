@@ -57,7 +57,7 @@ server = "comany_fights.server.app:main"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
-addopts = "--import-mode=prepend"
+addopts = "--import-mode=importlib"
 
 [tool.setuptools]
 include-package-data = true

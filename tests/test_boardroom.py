@@ -1,15 +1,11 @@
-"""Unit tests for BOARDROOM L2 environment — test/l1-verification."""
+"""Unit tests for BOARDROOM L2 environment — feat/l2-seven-ceos."""
 
 import random
-import sys
-import os
 
 import pytest
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 from server.boardroom_environment import BoardroomEnvironment
-from server.companies import L2_COMPANIES, STARTING_STATS
+from server.companies import L2_COMPANIES, L2_STARTING_STATS
 from models import BoardroomAction, BoardroomObservation
 
 
@@ -70,10 +66,10 @@ class TestReset:
         env = BoardroomEnvironment()
         obs = env.reset()
         assert obs.your_stats is not None
-        assert obs.your_stats.cash == STARTING_STATS["cash"]
-        assert obs.your_stats.market_share == STARTING_STATS["market_share"]
-        assert obs.your_stats.stock_price == STARTING_STATS["stock_price"]
-        assert obs.your_stats.reputation == STARTING_STATS["reputation"]
+        assert obs.your_stats.cash == L2_STARTING_STATS["cash"]
+        assert obs.your_stats.market_share == L2_STARTING_STATS["market_share"]
+        assert obs.your_stats.stock_price == L2_STARTING_STATS["stock_price"]
+        assert obs.your_stats.reputation == L2_STARTING_STATS["reputation"]
 
     def test_not_done_at_reset(self):
         env = BoardroomEnvironment()
