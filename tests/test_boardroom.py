@@ -9,7 +9,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from server.boardroom_environment import BoardroomEnvironment
-from server.companies import L1_COMPANIES, STARTING_STATS
+from server.companies import L2_COMPANIES, STARTING_STATS
 from models import BoardroomAction, BoardroomObservation
 
 
@@ -17,7 +17,7 @@ from models import BoardroomAction, BoardroomObservation
 # Helpers
 # ---------------------------------------------------------------------------
 
-RIVAL_NAMES = [c["name"] for c in L1_COMPANIES if c["name"] != "Vermillion Capital"]
+RIVAL_NAMES = [c["name"] for c in L2_COMPANIES if c["name"] != "Vermillion Capital"]
 PRIMARY = "Vermillion Capital"
 
 
@@ -56,10 +56,10 @@ class TestReset:
         obs = env.reset()
         assert obs.max_turns == 12
 
-    def test_four_companies_present(self):
+    def test_seven_companies_present(self):
         env = BoardroomEnvironment()
         obs = env.reset()
-        assert len(obs.all_companies) == 4
+        assert len(obs.all_companies) == 7
 
     def test_all_companies_alive_at_start(self):
         env = BoardroomEnvironment()
@@ -373,7 +373,7 @@ class TestFullRollout:
             atype = rng.choice(["EARNINGS_CALL", "SABOTAGE", "HOLD"])
             obs = env.step(BoardroomAction(action_type=atype))
             assert obs.leaderboard
-            assert len(obs.all_companies) == 4
+            assert len(obs.all_companies) == 7
             assert obs.prompt
             if obs.done:
                 break
@@ -384,3 +384,103 @@ class TestFullRollout:
         for i in range(1, 5):
             env.step(hold())
             assert env.state.step_count == i
+
+
+# ---------------------------------------------------------------------------
+# 9. PROPOSE_MERGER action
+# ---------------------------------------------------------------------------
+
+class TestProposeMerger:
+    def test_no_crash(self):
+        env = make_env()
+        obs = env.step(
+            BoardroomAction(action_type="PROPOSE_MERGER", action_target=RIVAL_NAMES[0])
+        )
+        assert isinstance(obs, BoardroomObservation)
+
+    def test_invalid_target_demoted_to_hold(self):
+        env = make_env()
+        obs = env.step(
+            BoardroomAction(action_type="PROPOSE_MERGER", action_target="Ghost Corp")
+        )
+        assert isinstance(obs, BoardroomObservation)
+
+    def test_self_target_demoted_to_hold(self):
+        env = make_env()
+        obs = env.step(
+            BoardroomAction(action_type="PROPOSE_MERGER", action_target=PRIMARY)
+        )
+        assert isinstance(obs, BoardroomObservation)
+
+    def test_mutual_merger_absorbs_target(self):
+        """Force a mutual merger: target proposes back to PRIMARY → target is absorbed."""
+        from server.game_logic import TurnAction
+
+        env = make_env()
+        target_name = RIVAL_NAMES[0]
+
+        original = env._heuristic_action
+        def rigged(name):
+            if name == target_name:
+                return TurnAction(
+                    company_name=name, private_emails=[], press_release=None,
+                    action_type="PROPOSE_MERGER", action_target=PRIMARY,
+                )
+            return original(name)
+        env._heuristic_action = rigged
+
+        env.step(BoardroomAction(action_type="PROPOSE_MERGER", action_target=target_name))
+        assert env._companies[target_name].alive is False
+
+    def test_mutual_merger_primary_gains_assets(self):
+        """After mutual merger PRIMARY should have more cash and market share."""
+        from server.game_logic import TurnAction
+
+        env = make_env()
+        target_name = RIVAL_NAMES[0]
+        pre_cash = env._companies[PRIMARY].cash
+        pre_share = env._companies[PRIMARY].market_share
+
+        original = env._heuristic_action
+        def rigged(name):
+            if name == target_name:
+                return TurnAction(
+                    company_name=name, private_emails=[], press_release=None,
+                    action_type="PROPOSE_MERGER", action_target=PRIMARY,
+                )
+            return original(name)
+        env._heuristic_action = rigged
+
+        env.step(BoardroomAction(action_type="PROPOSE_MERGER", action_target=target_name))
+        assert env._companies[PRIMARY].cash > pre_cash
+        assert env._companies[PRIMARY].market_share > pre_share
+
+    def test_one_sided_merger_penalises_proposer(self):
+        """One-sided PROPOSE_MERGER should cost PRIMARY reputation."""
+        from server.game_logic import TurnAction
+
+        env = make_env()
+        # Force all heuristics to HOLD so no mutual
+        env._heuristic_action = lambda name: TurnAction(
+            company_name=name, private_emails=[], press_release=None,
+            action_type="HOLD", action_target=None,
+        )
+
+        start_rep = env._companies[PRIMARY].reputation
+        env.step(BoardroomAction(action_type="PROPOSE_MERGER", action_target=RIVAL_NAMES[0]))
+        assert env._companies[PRIMARY].reputation < start_rep
+
+    def test_one_sided_merger_boosts_target(self):
+        """One-sided hostile attempt should give the target a market-share boost."""
+        from server.game_logic import TurnAction
+
+        env = make_env()
+        env._heuristic_action = lambda name: TurnAction(
+            company_name=name, private_emails=[], press_release=None,
+            action_type="HOLD", action_target=None,
+        )
+
+        target_name = RIVAL_NAMES[0]
+        pre_share = env._companies[target_name].market_share
+        env.step(BoardroomAction(action_type="PROPOSE_MERGER", action_target=target_name))
+        assert env._companies[target_name].market_share > pre_share

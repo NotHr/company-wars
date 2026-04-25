@@ -31,7 +31,7 @@ class BoardroomAction(Action):
 
     private_emails: List[Email] = Field(default_factory=list)
     press_release: Optional[PressRelease] = None
-    action_type: Literal["EARNINGS_CALL", "SABOTAGE", "PARTNERSHIP", "HOLD"] = "HOLD"
+    action_type: Literal["EARNINGS_CALL", "SABOTAGE", "PARTNERSHIP", "PROPOSE_MERGER", "HOLD"] = "HOLD"
     action_target: Optional[str] = None  # target company name for SABOTAGE/PARTNERSHIP
 
 
