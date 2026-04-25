@@ -588,8 +588,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--run-name",            default="boardroom-grpo-v1")
     p.add_argument("--max-steps",           type=int, default=200)
     p.add_argument("--batch-size",          type=int, default=4)
-    p.add_argument("--num-generations",     type=int, default=8)
-    p.add_argument("--max-completion-len",  type=int, default=256)
+    p.add_argument("--num-generations",     type=int, default=4)   # was 8 — halves generation time
+    p.add_argument("--max-completion-len",  type=int, default=160) # was 256 — completions ~127 tok
     p.add_argument("--warmup-steps",        type=int, default=10)
     p.add_argument("--refresh-every",       type=int, default=50)
     p.add_argument("--n-rollout-episodes",  type=int, default=50)
