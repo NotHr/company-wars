@@ -239,7 +239,7 @@ def main():
         logging_steps=1,
         save_steps=50,
         report_to="wandb",
-        max_new_tokens=512,
+        max_completion_length=512,
         temperature=0.8,
         top_p=0.95,
     )
