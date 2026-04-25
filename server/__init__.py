@@ -1,11 +1,5 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-#
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree.
+"""BOARDROOM environment server components."""
 
-"""Comany Fights environment server components."""
+from .boardroom_environment import BoardroomEnvironment
 
-from .comany_fights_environment import ComanyFightsEnvironment
-
-__all__ = ["ComanyFightsEnvironment"]
+__all__ = ["BoardroomEnvironment"]

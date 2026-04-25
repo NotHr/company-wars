@@ -1,16 +1,13 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-#
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree.
+"""BOARDROOM — Multi-Agent Corporate Warfare Environment."""
 
-"""Comany Fights Environment."""
-
-from .client import ComanyFightsEnv
-from .models import ComanyFightsAction, ComanyFightsObservation
+from .client import BoardroomEnv
+from .models import BoardroomAction, BoardroomObservation, CompanyStats, Email, PressRelease
 
 __all__ = [
-    "ComanyFightsAction",
-    "ComanyFightsObservation",
-    "ComanyFightsEnv",
+    "BoardroomAction",
+    "BoardroomObservation",
+    "CompanyStats",
+    "Email",
+    "PressRelease",
+    "BoardroomEnv",
 ]

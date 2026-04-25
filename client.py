@@ -1,10 +1,4 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-#
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree.
-
-"""Comany Fights Environment Client."""
+"""BOARDROOM Environment Client."""
 
 from typing import Dict
 
@@ -12,69 +6,59 @@ from openenv.core import EnvClient
 from openenv.core.client_types import StepResult
 from openenv.core.env_server.types import State
 
-from .models import ComanyFightsAction, ComanyFightsObservation
+from .models import BoardroomAction, BoardroomObservation, CompanyStats
 
 
-class ComanyFightsEnv(
-    EnvClient[ComanyFightsAction, ComanyFightsObservation, State]
-):
+class BoardroomEnv(EnvClient[BoardroomAction, BoardroomObservation, State]):
     """
-    Client for the Comany Fights Environment.
+    Client for the BOARDROOM corporate warfare environment.
 
-    This client maintains a persistent WebSocket connection to the environment server,
-    enabling efficient multi-step interactions with lower latency.
-    Each client instance has its own dedicated environment session on the server.
+    Maintains a persistent WebSocket connection. One call to reset() starts
+    a game; repeated step() calls advance through up to 12 turns.
 
     Example:
-        >>> # Connect to a running server
-        >>> with ComanyFightsEnv(base_url="http://localhost:8000") as client:
-        ...     result = client.reset()
-        ...     print(result.observation.echoed_message)
-        ...
-        ...     result = client.step(ComanyFightsAction(message="Hello!"))
-        ...     print(result.observation.echoed_message)
-
-    Example with Docker:
-        >>> # Automatically start container and connect
-        >>> client = ComanyFightsEnv.from_docker_image("comany_fights-env:latest")
-        >>> try:
-        ...     result = client.reset()
-        ...     result = client.step(ComanyFightsAction(message="Test"))
-        ... finally:
-        ...     client.close()
+        with BoardroomEnv(base_url="http://localhost:8000") as env:
+            obs = env.reset()
+            print(obs.prompt)          # full formatted LLM prompt
+            action = BoardroomAction(action_type="EARNINGS_CALL")
+            result = env.step(action)
+            print(result.reward)
     """
 
-    def _step_payload(self, action: ComanyFightsAction) -> Dict:
-        """
-        Convert ComanyFightsAction to JSON payload for step message.
-
-        Args:
-            action: ComanyFightsAction instance
-
-        Returns:
-            Dictionary representation suitable for JSON encoding
-        """
-        return {
-            "message": action.message,
+    def _step_payload(self, action: BoardroomAction) -> Dict:
+        payload: Dict = {
+            "action_type": action.action_type,
+            "action_target": action.action_target,
+            "private_emails": [e.model_dump() for e in action.private_emails],
         }
+        if action.press_release:
+            payload["press_release"] = action.press_release.model_dump()
+        return payload
 
-    def _parse_result(self, payload: Dict) -> StepResult[ComanyFightsObservation]:
-        """
-        Parse server response into StepResult[ComanyFightsObservation].
-
-        Args:
-            payload: JSON response data from server
-
-        Returns:
-            StepResult with ComanyFightsObservation
-        """
+    def _parse_result(self, payload: Dict) -> StepResult[BoardroomObservation]:
         obs_data = payload.get("observation", {})
-        observation = ComanyFightsObservation(
-            echoed_message=obs_data.get("echoed_message", ""),
-            message_length=obs_data.get("message_length", 0),
+
+        your_stats = None
+        if obs_data.get("your_stats"):
+            your_stats = CompanyStats(**obs_data["your_stats"])
+
+        all_companies = [CompanyStats(**c) for c in obs_data.get("all_companies", [])]
+
+        observation = BoardroomObservation(
+            you_are=obs_data.get("you_are", ""),
+            turn=obs_data.get("turn", 0),
+            max_turns=obs_data.get("max_turns", 12),
+            your_stats=your_stats,
+            all_companies=all_companies,
+            emails_received=obs_data.get("emails_received", []),
+            press_wire=obs_data.get("press_wire", []),
+            active_partnerships=obs_data.get("active_partnerships", []),
+            pending_partnership_proposals=obs_data.get("pending_partnership_proposals", []),
+            leaderboard=obs_data.get("leaderboard", []),
+            game_log=obs_data.get("game_log", []),
+            prompt=obs_data.get("prompt", ""),
             done=payload.get("done", False),
             reward=payload.get("reward"),
-            metadata=obs_data.get("metadata", {}),
         )
 
         return StepResult(
@@ -84,15 +68,6 @@ class ComanyFightsEnv(
         )
 
     def _parse_state(self, payload: Dict) -> State:
-        """
-        Parse server response into State object.
-
-        Args:
-            payload: JSON response from state request
-
-        Returns:
-            State object with episode_id and step_count
-        """
         return State(
             episode_id=payload.get("episode_id"),
             step_count=payload.get("step_count", 0),

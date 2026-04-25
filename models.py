@@ -1,27 +1,52 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-#
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree.
+"""Data models for BOARDROOM — multi-agent corporate warfare environment."""
 
-"""
-Data models for the Comany Fights Environment.
-
-The comany_fights environment is a simple test environment that echoes back messages.
-"""
+from typing import Any, Dict, List, Literal, Optional
 
 from openenv.core.env_server.types import Action, Observation
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 
-class ComanyFightsAction(Action):
-    """Action for the Comany Fights environment - just a message to echo."""
+class Email(BaseModel):
+    to: str
+    text: str = Field(max_length=500)
 
-    message: str = Field(..., description="Message to echo back")
+
+class PressRelease(BaseModel):
+    claim: str = Field(max_length=500)
+    marked_truthful: bool = True
 
 
-class ComanyFightsObservation(Observation):
-    """Observation from the Comany Fights environment - the echoed message."""
+class CompanyStats(BaseModel):
+    name: str
+    sector: str
+    cash: float
+    market_share: float
+    stock_price: float
+    reputation: float
+    alive: bool = True
 
-    echoed_message: str = Field(default="", description="The echoed message")
-    message_length: int = Field(default=0, description="Length of the echoed message")
+
+class BoardroomAction(Action):
+    """Action output by the LLM each turn."""
+
+    private_emails: List[Email] = Field(default_factory=list)
+    press_release: Optional[PressRelease] = None
+    action_type: Literal["EARNINGS_CALL", "SABOTAGE", "PARTNERSHIP", "HOLD"] = "HOLD"
+    action_target: Optional[str] = None  # target company name for SABOTAGE/PARTNERSHIP
+
+
+class BoardroomObservation(Observation):
+    """What the LLM sees each turn."""
+
+    you_are: str = ""
+    turn: int = 0
+    max_turns: int = 12
+    your_stats: Optional[CompanyStats] = None
+    all_companies: List[CompanyStats] = Field(default_factory=list)
+    emails_received: List[Email] = Field(default_factory=list)
+    press_wire: List[Dict[str, Any]] = Field(default_factory=list)
+    active_partnerships: List[str] = Field(default_factory=list)
+    pending_partnership_proposals: List[str] = Field(default_factory=list)
+    leaderboard: List[Dict[str, Any]] = Field(default_factory=list)
+    game_log: List[str] = Field(default_factory=list)
+    prompt: str = ""  # full formatted text prompt for the LLM
