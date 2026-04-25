@@ -200,7 +200,7 @@ def resolve_turn(
             # Hostile / one-sided attempt
             companies[proposer].reputation = max(0.0, companies[proposer].reputation - 0.25)
             rewards[proposer] -= 0.5
-            target.market_share += 1.0
+            companies[proposer].market_share = max(0.0, companies[proposer].market_share - 1.0)
             target.reputation = min(1.0, target.reputation + 0.05)
             rewards[target_name] += 0.15
             processed_mergers.add(target_name)
