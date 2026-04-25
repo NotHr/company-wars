@@ -1,4 +1,4 @@
-"""Unit tests for BOARDROOM L1 environment — test/l1-verification."""
+"""Unit tests for BOARDROOM L2 environment — test/l1-verification."""
 
 import random
 import sys
