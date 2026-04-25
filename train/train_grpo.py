@@ -35,25 +35,73 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List
 
-# HF Jobs copies script to // but sets cwd to the repo root.
-# Use cwd first; fall back to walking up from __file__.
+# HF Jobs copies script to // and sets cwd to /
+# Scan known locations before falling back to __file__ walk
 _CWD = Path.cwd()
-if (_CWD / "models.py").exists():
-    _REPO_DIR = _CWD
-else:
+print(f"[path] cwd={_CWD}  __file__={__file__}")
+try:
+    print(f"[path] / contents: {os.listdir('/')}")
+except Exception:
+    pass
+
+_CANDIDATES = [
+    _CWD,
+    Path(__file__).resolve().parent,
+    Path(__file__).resolve().parent.parent,
+    Path("/app"),
+    Path("/code"),
+    Path("/workspace"),
+    Path("/repo"),
+    Path("/home/user"),
+    Path("/root"),
+    Path("/tmp/repo"),
+]
+
+_REPO_DIR = None
+for _c in _CANDIDATES:
+    if _c.exists() and (_c / "models.py").exists():
+        _REPO_DIR = _c
+        break
+
+if _REPO_DIR is None:
+    # Walk up from __file__
     _SEARCH = Path(__file__).resolve().parent
-    for _ in range(6):
+    for _ in range(8):
         if (_SEARCH / "models.py").exists():
+            _REPO_DIR = _SEARCH
             break
         _SEARCH = _SEARCH.parent
-    _REPO_DIR = _SEARCH
+
+if _REPO_DIR is None:
+    # Glob: find models.py at depth 1-2 from filesystem root
+    import glob as _glob
+    for _pattern in ["/*/models.py", "/*/*/models.py"]:
+        _hits = _glob.glob(_pattern)
+        if _hits:
+            _REPO_DIR = Path(_hits[0]).parent
+            break
+
+if _REPO_DIR is None:
+    # Debug dump to help diagnose
+    try:
+        print(f"[path] / contents: {os.listdir('/')}")
+    except Exception:
+        pass
+    for _c in _CANDIDATES:
+        if _c.exists():
+            try:
+                print(f"[path] {_c}: {os.listdir(str(_c))[:15]}")
+            except Exception:
+                pass
+    raise RuntimeError("Cannot locate repo root (models.py not found). "
+                       "Check [path] debug lines above.")
 
 _TRAIN_DIR = _REPO_DIR / "train"
 for _p in [str(_REPO_DIR), str(_TRAIN_DIR)]:
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-print(f"[path] repo={_REPO_DIR}  cwd={_CWD}")
+print(f"[path] repo={_REPO_DIR}  sys.path[:3]={sys.path[:3]}")
 
 # ------------------------------------------------------------------ #
 # Inlined from action_loop.py — self-contained for HF Jobs            #
