@@ -1,4 +1,8 @@
-.context
-venv/
-
+.context__pycache__/
+*.pyc
 .venv/
+replays/
+.context
+checkpoints/
+wandb/
+*.egg-info/
