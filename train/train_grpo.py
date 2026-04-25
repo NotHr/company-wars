@@ -49,8 +49,7 @@ _THINK_RE  = re.compile(r"<think>.*?</think>", re.DOTALL)
 _JSON_RE   = re.compile(r"\{.*\}", re.DOTALL)
 _MAX_RETRIES = 3
 
-SYSTEM_PROMPT = """/no_think
-You are CEO of a company in a corporate warfare game.
+SYSTEM_PROMPT = """You are CEO of a company in a corporate warfare game.
 Output ONLY valid JSON — no explanation, no markdown, no extra text.
 
 Format:
@@ -100,7 +99,7 @@ def parse_completion(text: str) -> ParseResult:
 # ------------------------------------------------------------------ #
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser()
-    p.add_argument("--model-id",            default="Qwen/Qwen3.5-0.8B")
+    p.add_argument("--model-id",            default="google/gemma-4-E2B-it")
     p.add_argument("--output-dir",          default="checkpoints/boardroom-grpo")
     p.add_argument("--run-name",            default="boardroom-grpo-v1")
     p.add_argument("--max-steps",           type=int, default=200)
