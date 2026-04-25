@@ -832,7 +832,7 @@ def main():
         per_device_train_batch_size = args.batch_size,
         num_generations             = args.num_generations,
         gradient_accumulation_steps = 2,
-        learning_rate               = 5e-6,
+        learning_rate               = 2e-6,       # was 5e-6 — too aggressive, caused KL spikes
         lr_scheduler_type           = "cosine",
         warmup_steps                = args.warmup_steps,
         bf16                        = not args.fp16,
@@ -841,6 +841,8 @@ def main():
         save_steps                  = 50,
         report_to                   = "wandb",
         max_completion_length       = args.max_completion_len,
+        beta                        = 0.1,         # KL penalty coeff (default 0.04 too weak)
+        max_grad_norm               = 0.5,         # clip exploding gradients (step 28: norm=39.7)
     )
 
     trainer = GRPOTrainer(
