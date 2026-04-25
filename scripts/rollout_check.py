@@ -11,14 +11,14 @@ from server.boardroom_environment import BoardroomEnvironment
 from models import BoardroomAction
 
 COMPANIES = ["Goldspire Industries", "Sablemark Holdings", "Ironhold Logistics"]
-ACTION_TYPES = ["EARNINGS_CALL", "SABOTAGE", "PARTNERSHIP", "HOLD"]
+ACTION_TYPES = ["EARNINGS_CALL", "SABOTAGE", "PARTNERSHIP", "PROPOSE_MERGER", "HOLD"]
 
 rng = random.Random(42)
 
 def random_action() -> BoardroomAction:
     atype = rng.choice(ACTION_TYPES)
     target = None
-    if atype in ("SABOTAGE", "PARTNERSHIP"):
+    if atype in ("SABOTAGE", "PARTNERSHIP", "PROPOSE_MERGER"):
         target = rng.choice(COMPANIES)
     return BoardroomAction(action_type=atype, action_target=target)
 
