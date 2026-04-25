@@ -1,7 +1,11 @@
 README.md
+__init__.py
+client.py
+models.py
 pyproject.toml
 ./__init__.py
 ./client.py
+./conftest.py
 ./models.py
 openenv_comany_fights.egg-info/PKG-INFO
 openenv_comany_fights.egg-info/SOURCES.txt
@@ -11,4 +15,9 @@ openenv_comany_fights.egg-info/requires.txt
 openenv_comany_fights.egg-info/top_level.txt
 server/__init__.py
 server/app.py
+server/boardroom_environment.py
 server/comany_fights_environment.py
+server/companies.py
+server/game_logic.py
+server/reward.py
+tests/test_boardroom.py
