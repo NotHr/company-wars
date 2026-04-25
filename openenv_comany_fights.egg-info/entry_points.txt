@@ -1,0 +1,2 @@
+[console_scripts]
+server = comany_fights.server.app:main
