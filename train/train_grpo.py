@@ -33,7 +33,8 @@ import sys
 from pathlib import Path
 from typing import List
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))  # repo root
+sys.path.insert(0, str(Path(__file__).parent))          # train/ dir
 
 
 # ------------------------------------------------------------------ #
@@ -140,7 +141,7 @@ def build_hf_dataset(prompts: List[str]):
 # Reward function                                                      #
 # ------------------------------------------------------------------ #
 def reward_fn(prompts: List[str], completions: List[str], **kwargs) -> List[float]:
-    from train.action_loop import parse_completion
+    from action_loop import parse_completion
 
     COMPANIES = {
         "Vermillion Capital", "Goldspire Industries",
@@ -283,8 +284,8 @@ def main():
 
     # Disable Qwen3 thinking tokens — JSON only, no <think> blocks
     # This cuts completion length ~5× and speeds up training significantly
-    from train.action_loop import SYSTEM_PROMPT
-    import train.action_loop as al
+    from action_loop import SYSTEM_PROMPT
+    import action_loop as al
     al.SYSTEM_PROMPT = "/no_think\n" + SYSTEM_PROMPT
 
     print("[dataset] collecting rollout prompts ...")
