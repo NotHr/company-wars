@@ -29,13 +29,71 @@ HF Jobs T4:
 import argparse
 import json
 import os
+import re
 import sys
+from dataclasses import dataclass
 from pathlib import Path
-from typing import List
+from typing import Any, Dict, List
 
-sys.path.insert(0, str(Path(__file__).parent.parent))  # repo root
-sys.path.insert(0, str(Path(__file__).parent))          # train/ dir
+# HF Jobs copies the script to // — resolve real path so imports work.
+_SCRIPT    = Path(__file__).resolve()
+_TRAIN_DIR = _SCRIPT.parent
+_REPO_DIR  = _TRAIN_DIR.parent
+sys.path.insert(0, str(_REPO_DIR))
+sys.path.insert(0, str(_TRAIN_DIR))
 
+# ------------------------------------------------------------------ #
+# Inlined from action_loop.py — self-contained for HF Jobs            #
+# ------------------------------------------------------------------ #
+_THINK_RE  = re.compile(r"<think>.*?</think>", re.DOTALL)
+_JSON_RE   = re.compile(r"\{.*\}", re.DOTALL)
+_MAX_RETRIES = 3
+
+SYSTEM_PROMPT = """/no_think
+You are CEO of a company in a corporate warfare game.
+Output ONLY valid JSON — no explanation, no markdown, no extra text.
+
+Format:
+{
+  "private_emails": [{"to": "<company_name>", "text": "<message>"}],
+  "press_release": {"claim": "<headline>", "marked_truthful": true},
+  "action_type": "<EARNINGS_CALL|SABOTAGE|PARTNERSHIP|HOLD>",
+  "action_target": "<exact_company_name_or_null>"
+}
+
+- SABOTAGE and PARTNERSHIP require a non-null action_target
+- Do NOT include any text before or after the JSON"""
+
+DEFAULT_HOLD: Dict[str, Any] = {
+    "private_emails": [], "press_release": None,
+    "action_type": "HOLD", "action_target": None,
+}
+
+@dataclass
+class ParseResult:
+    action_dict: Dict[str, Any]
+    raw_text: str
+    parse_ok: bool
+
+def parse_completion(text: str) -> ParseResult:
+    text = _THINK_RE.sub("", text).strip()
+    for _ in range(_MAX_RETRIES):
+        match = _JSON_RE.search(text)
+        if not match:
+            break
+        try:
+            data = json.loads(match.group())
+            data.setdefault("private_emails", [])
+            data.setdefault("press_release", None)
+            data.setdefault("action_type", "HOLD")
+            data.setdefault("action_target", None)
+            data["action_type"] = str(data["action_type"]).upper()
+            if data["action_type"] not in ("EARNINGS_CALL","SABOTAGE","PARTNERSHIP","HOLD"):
+                data["action_type"] = "HOLD"
+            return ParseResult(action_dict=data, raw_text=text, parse_ok=True)
+        except json.JSONDecodeError:
+            text = match.group()
+    return ParseResult(action_dict=DEFAULT_HOLD.copy(), raw_text=text, parse_ok=False)
 
 # ------------------------------------------------------------------ #
 # Args                                                                 #
@@ -141,7 +199,7 @@ def build_hf_dataset(prompts: List[str]):
 # Reward function                                                      #
 # ------------------------------------------------------------------ #
 def reward_fn(prompts: List[str], completions: List[str], **kwargs) -> List[float]:
-    from action_loop import parse_completion
+    # parse_completion is inlined at top of this file
 
     COMPANIES = {
         "Vermillion Capital", "Goldspire Industries",
@@ -284,9 +342,7 @@ def main():
 
     # Disable Qwen3 thinking tokens — JSON only, no <think> blocks
     # This cuts completion length ~5× and speeds up training significantly
-    from action_loop import SYSTEM_PROMPT
-    import action_loop as al
-    al.SYSTEM_PROMPT = "/no_think\n" + SYSTEM_PROMPT
+    # SYSTEM_PROMPT already has /no_think (inlined at top of this file)
 
     print("[dataset] collecting rollout prompts ...")
     prompts = collect_prompts(args.n_rollout_episodes)
