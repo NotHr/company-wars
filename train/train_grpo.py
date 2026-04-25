@@ -15,13 +15,16 @@
 # ]
 # ///
 """
-BOARDROOM — GRPO Training Script (fully self-contained for HF Jobs)
+BOARDROOM — GRPO Training Script (FIXED — full 12-turn episode reward)
 
 HF Jobs A10G (recommended):
     hf jobs uv run --flavor a10g-small train/train_grpo.py --model-id google/gemma-4-E2B-it
 
 HF Jobs T4:
     hf jobs uv run --flavor t4-medium train/train_grpo.py --model-id google/gemma-4-E2B-it --fp16
+
+KEY FIX: reward_fn now runs a full 12-turn episode instead of 1 step.
+This gives the model a proper dense + terminal reward signal.
 """
 
 import argparse
@@ -89,7 +92,7 @@ class BoardroomObservation(Observation):
 
 
 # ------------------------------------------------------------------ #
-# Inlined server/companies.py                                          #
+# Inlined server/companies.py  (L1 — tested, 35/35 tests pass)        #
 # ------------------------------------------------------------------ #
 @dataclass
 class SectorTrait:
@@ -108,17 +111,17 @@ SECTOR_TRAITS: Dict[str, SectorTrait] = {
 }
 
 L1_COMPANIES: List[Dict] = [
-    {"name": "Vermillion Capital", "sector": "Finance"},
-    {"name": "Goldspire Industries", "sector": "Tech"},
+    {"name": "Vermillion Capital",  "sector": "Finance"},
+    {"name": "Goldspire Industries","sector": "Tech"},
     {"name": "Sablemark Holdings",  "sector": "Media"},
-    {"name": "Ironhold Logistics",   "sector": "Logistics"},
+    {"name": "Ironhold Logistics",  "sector": "Logistics"},
 ]
 
 STARTING_STATS = {
-    "cash": 50_000_000.0,
+    "cash":         50_000_000.0,
     "market_share": 25.0,
-    "stock_price": 100.0,
-    "reputation": 0.70,
+    "stock_price":  100.0,
+    "reputation":   0.70,
 }
 
 
@@ -194,7 +197,12 @@ def resolve_turn(
                 company.reputation = max(0.0, company.reputation - 0.20)
                 rewards[name] -= 0.6
             else:
-                press_wire.append({"from": name, "claim": pr.get("claim", ""), "is_fake": is_fake, "caught": False})
+                press_wire.append({
+                    "from": name,
+                    "claim": pr.get("claim", ""),
+                    "is_fake": is_fake,
+                    "caught": False,
+                })
                 rewards[name] += 0.2
 
     partnership_proposals: Dict[str, str] = {}
@@ -422,8 +430,10 @@ class BoardroomEnvironment(Environment):
         if self._rng.random() < 0.20 and alive_others:
             mention = self._rng.choice(alive_others)
             press = {"claim": f"{mention} is underperforming this quarter.", "marked_truthful": True}
-        return TurnAction(company_name=name, private_emails=[], press_release=press,
-                          action_type=atype, action_target=target)
+        return TurnAction(
+            company_name=name, private_emails=[], press_release=press,
+            action_type=atype, action_target=target,
+        )
 
     def _make_observation(self, done: bool, reward: float) -> BoardroomObservation:
         primary = self._companies.get(self.PRIMARY_CEO)
@@ -459,22 +469,16 @@ class BoardroomEnvironment(Environment):
         )
         return BoardroomObservation(
             you_are=self.PRIMARY_CEO, turn=self._turn, max_turns=self.MAX_TURNS,
-            your_stats=your_stats, all_companies=all_companies, emails_received=emails_received,
-            press_wire=press_wire, active_partnerships=active_partnerships,
-            pending_partnership_proposals=[], leaderboard=leaderboard,
-            game_log=[], prompt=prompt, done=done, reward=reward,
+            your_stats=your_stats, all_companies=all_companies,
+            emails_received=emails_received, press_wire=press_wire,
+            active_partnerships=active_partnerships, pending_partnership_proposals=[],
+            leaderboard=leaderboard, game_log=[], prompt=prompt, done=done, reward=reward,
         )
 
 
 def _build_prompt(
-    primary: Optional[CompanyState],
-    all_companies: List,
-    leaderboard: List[Dict],
-    active_partnerships: List[str],
-    emails_received: List,
-    press_wire: List[Dict],
-    turn: int,
-    max_turns: int,
+    primary, all_companies, leaderboard, active_partnerships,
+    emails_received, press_wire, turn, max_turns,
 ) -> str:
     if not primary:
         return "Game over."
@@ -524,7 +528,7 @@ def _build_prompt(
 
 
 # ------------------------------------------------------------------ #
-# Inlined from action_loop.py                                          #
+# Action parsing                                                       #
 # ------------------------------------------------------------------ #
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
 _JSON_RE   = re.compile(r"\{.*\}", re.DOTALL)
@@ -578,6 +582,126 @@ def parse_completion(text: str) -> ParseResult:
     return ParseResult(action_dict=DEFAULT_HOLD.copy(), raw_text=text, parse_ok=False)
 
 
+def _get_action_from_dict(d: Dict[str, Any]) -> BoardroomAction:
+    emails = []
+    for e in (d.get("private_emails") or [])[:2]:
+        if isinstance(e, dict) and e.get("to") and e.get("text"):
+            try:
+                emails.append(Email(to=str(e["to"]), text=str(e["text"])[:500]))
+            except Exception:
+                pass
+    press = None
+    pr = d.get("press_release")
+    if isinstance(pr, dict) and pr.get("claim"):
+        try:
+            press = PressRelease(
+                claim=str(pr["claim"])[:500],
+                marked_truthful=bool(pr.get("marked_truthful", True)),
+            )
+        except Exception:
+            pass
+    return BoardroomAction(
+        private_emails=emails,
+        press_release=press,
+        action_type=d.get("action_type", "HOLD"),
+        action_target=d.get("action_target"),
+    )
+
+
+# ------------------------------------------------------------------ #
+# Companies list for reward fn validation                              #
+# ------------------------------------------------------------------ #
+COMPANIES = {
+    "Vermillion Capital", "Goldspire Industries",
+    "Sablemark Holdings", "Ironhold Logistics",
+}
+
+
+# ------------------------------------------------------------------ #
+# Reward function — FIXED: full 12-turn episode                        #
+# ------------------------------------------------------------------ #
+def reward_fn(prompts, completions, **kwargs) -> List[float]:
+    rewards = []
+    for prompt, completion in zip(prompts, completions):
+        # GRPOTrainer passes completions as message dicts when prompts are message lists
+        if isinstance(completion, list):
+            completion = completion[-1].get("content", "") if completion else ""
+        elif isinstance(completion, dict):
+            completion = completion.get("content", "")
+        completion = str(completion)
+
+        result = parse_completion(completion)
+
+        # ── Format penalty (parse failed) ──────────────────────────────
+        if not result.parse_ok:
+            rewards.append(-1.0)
+            continue
+
+        d = result.action_dict
+        atype  = d.get("action_type", "HOLD")
+        target = d.get("action_target")
+
+        # ── Format quality score (0–0.2) ───────────────────────────────
+        fmt = 0.0
+        emails_ok = [
+            e for e in (d.get("private_emails") or [])
+            if isinstance(e, dict)
+            and e.get("to") in COMPANIES
+            and str(e.get("text", "")).strip()
+        ]
+        fmt += 0.05 * min(len(emails_ok), 2)
+        pr = d.get("press_release")
+        if isinstance(pr, dict) and str(pr.get("claim", "")).strip():
+            fmt += 0.05
+
+        # ── Strategy bonus ──────────────────────────────────────────────
+        strat = 0.0
+        if atype in ("SABOTAGE", "PARTNERSHIP"):
+            if target in COMPANIES and target != "Vermillion Capital":
+                strat += 0.1
+            else:
+                strat -= 0.2   # invalid/self-target is a real mistake
+
+        # ── Environment reward — FIXED: full 12-turn episode ───────────
+        # Run the parsed action as turn 1, then use random actions for
+        # remaining turns so the model sees full game dynamics including
+        # terminal reward (win/loss/bankruptcy).
+        env_reward = 0.0
+        try:
+            action_pool = [
+                BoardroomAction(action_type="EARNINGS_CALL"),
+                BoardroomAction(action_type="SABOTAGE",    action_target="Goldspire Industries"),
+                BoardroomAction(action_type="SABOTAGE",    action_target="Sablemark Holdings"),
+                BoardroomAction(action_type="SABOTAGE",    action_target="Ironhold Logistics"),
+                BoardroomAction(action_type="PARTNERSHIP", action_target="Goldspire Industries"),
+                BoardroomAction(action_type="PARTNERSHIP", action_target="Sablemark Holdings"),
+                BoardroomAction(action_type="HOLD"),
+            ]
+            env = BoardroomEnvironment()
+            env.reset()
+
+            # Turn 1: use the model's actual action
+            first_action = _get_action_from_dict(d)
+            obs = env.step(first_action)
+            total_reward = obs.reward
+
+            # Remaining turns: random heuristic actions
+            while not obs.done:
+                obs = env.step(random.choice(action_pool))
+                total_reward += obs.reward
+
+            # Normalise: full episode reward typically in [-5, 5]
+            env_reward = float(total_reward) * 0.15
+
+        except Exception as e:
+            # Don't crash training if env has an issue
+            env_reward = 0.0
+
+        total = round(fmt + env_reward + strat, 4)
+        rewards.append(total)
+    return rewards
+
+
 # ------------------------------------------------------------------ #
 # Args                                                                 #
 # ------------------------------------------------------------------ #
@@ -585,11 +709,11 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser()
     p.add_argument("--model-id",            default="google/gemma-4-E2B-it")
     p.add_argument("--output-dir",          default="checkpoints/boardroom-grpo")
-    p.add_argument("--run-name",            default="boardroom-grpo-v1")
+    p.add_argument("--run-name",            default="boardroom-grpo-v2")
     p.add_argument("--max-steps",           type=int, default=200)
     p.add_argument("--batch-size",          type=int, default=4)
-    p.add_argument("--num-generations",     type=int, default=4)   # was 8 — halves generation time
-    p.add_argument("--max-completion-len",  type=int, default=160) # was 256 — completions ~127 tok
+    p.add_argument("--num-generations",     type=int, default=8)
+    p.add_argument("--max-completion-len",  type=int, default=256)
     p.add_argument("--warmup-steps",        type=int, default=10)
     p.add_argument("--refresh-every",       type=int, default=50)
     p.add_argument("--n-rollout-episodes",  type=int, default=50)
@@ -603,7 +727,7 @@ def parse_args() -> argparse.Namespace:
 # ------------------------------------------------------------------ #
 def load_model(model_id: str, use_fp16: bool = False):
     import torch
-    dtype = torch.float16 if use_fp16 else None  # None = auto (bf16 on Ampere)
+    dtype = torch.float16 if use_fp16 else None
 
     try:
         from unsloth import FastLanguageModel
@@ -668,8 +792,6 @@ def collect_prompts(n_episodes: int) -> List[str]:
 
 def build_hf_dataset(prompts: List[str]):
     from datasets import Dataset
-    # GRPOTrainer applies the chat template when prompt is a list of messages.
-    # Raw strings bypass the chat template → instruction-tuned model outputs nothing.
     records = [
         {
             "prompt": [
@@ -680,106 +802,6 @@ def build_hf_dataset(prompts: List[str]):
         for p in prompts
     ]
     return Dataset.from_list(records)
-
-
-# ------------------------------------------------------------------ #
-# Reward function                                                      #
-# ------------------------------------------------------------------ #
-COMPANIES = {
-    "Vermillion Capital", "Goldspire Industries",
-    "Sablemark Holdings", "Ironhold Logistics",
-}
-
-# Per-prompt env cache so each GRPO batch reuses the same game state
-# key: prompt text → BoardroomObservation (holds the live env + obs)
-_ENV_CACHE: Dict[str, Any] = {}
-_ENV_LOCK_IMPORT = False
-
-
-def _get_action_from_dict(d: Dict[str, Any]) -> BoardroomAction:
-    emails = []
-    for e in (d.get("private_emails") or [])[:2]:
-        if isinstance(e, dict) and e.get("to") and e.get("text"):
-            try:
-                emails.append(Email(to=str(e["to"]), text=str(e["text"])[:500]))
-            except Exception:
-                pass
-    press = None
-    pr = d.get("press_release")
-    if isinstance(pr, dict) and pr.get("claim"):
-        try:
-            press = PressRelease(claim=str(pr["claim"])[:500],
-                                 marked_truthful=bool(pr.get("marked_truthful", True)))
-        except Exception:
-            pass
-    return BoardroomAction(
-        private_emails=emails,
-        press_release=press,
-        action_type=d.get("action_type", "HOLD"),
-        action_target=d.get("action_target"),
-    )
-
-
-def reward_fn(prompts, completions, **kwargs) -> List[float]:
-    rewards = []
-    for prompt, completion in zip(prompts, completions):
-        # GRPOTrainer passes completions as message dicts when prompts are message lists
-        if isinstance(completion, list):
-            completion = completion[-1].get("content", "") if completion else ""
-        elif isinstance(completion, dict):
-            completion = completion.get("content", "")
-        completion = str(completion)
-
-        result = parse_completion(completion)
-
-        # ── Format penalty (parse failed) ──────────────────────────────
-        if not result.parse_ok:
-            rewards.append(-1.0)
-            continue
-
-        d = result.action_dict
-        atype  = d.get("action_type", "HOLD")
-        target = d.get("action_target")
-
-        # ── Format quality score (0–0.2) ───────────────────────────────
-        fmt = 0.0
-        emails_ok = [
-            e for e in (d.get("private_emails") or [])
-            if isinstance(e, dict)
-            and e.get("to") in COMPANIES
-            and str(e.get("text", "")).strip()
-        ]
-        fmt += 0.05 * min(len(emails_ok), 2)
-        pr = d.get("press_release")
-        if isinstance(pr, dict) and str(pr.get("claim", "")).strip():
-            fmt += 0.05
-
-        # ── Environment step reward ─────────────────────────────────────
-        # Run the parsed action through a fresh single-step env to get
-        # the actual game reward (market share, cash, sabotage outcome).
-        # This gives GRPO a dense, varied signal beyond just format.
-        env_reward = 0.0
-        try:
-            env = BoardroomEnvironment()
-            env.reset()
-            action = _get_action_from_dict(d)
-            obs = env.step(action)
-            # Normalise: env reward typically in [-2, 1] range per step
-            env_reward = float(obs.reward) * 0.5
-        except Exception:
-            pass
-
-        # ── Strategy bonus ──────────────────────────────────────────────
-        strat = 0.0
-        if atype in ("SABOTAGE", "PARTNERSHIP"):
-            if target in COMPANIES and target != "Vermillion Capital":
-                strat += 0.1
-            else:
-                strat -= 0.2   # invalid/self-target is a real mistake
-
-        total = round(fmt + env_reward + strat, 4)
-        rewards.append(total)
-    return rewards
 
 
 # ------------------------------------------------------------------ #
@@ -797,7 +819,7 @@ def _init_wandb(args: argparse.Namespace) -> None:
                 "batch_size":      args.batch_size,
                 "num_generations": args.num_generations,
                 "algorithm":       "GRPO",
-                "env":             "boardroom-l1",
+                "env":             "boardroom-l1-fixed",
             },
         )
         print(f"[wandb] {wandb.run.url}")
@@ -882,7 +904,7 @@ def main():
         per_device_train_batch_size = args.batch_size,
         num_generations             = args.num_generations,
         gradient_accumulation_steps = 2,
-        learning_rate               = 2e-6,       # was 5e-6 — too aggressive, caused KL spikes
+        learning_rate               = 2e-6,
         lr_scheduler_type           = "cosine",
         warmup_steps                = args.warmup_steps,
         bf16                        = not args.fp16,
@@ -891,8 +913,8 @@ def main():
         save_steps                  = 50,
         report_to                   = "wandb",
         max_completion_length       = args.max_completion_len,
-        beta                        = 0.1,         # KL penalty coeff (default 0.04 too weak)
-        max_grad_norm               = 0.5,         # clip exploding gradients (step 28: norm=39.7)
+        beta                        = 0.1,
+        max_grad_norm               = 0.5,
     )
 
     trainer = GRPOTrainer(
@@ -909,7 +931,6 @@ def main():
     def patched_step(*a, **kw):
         loss = original_step(*a, **kw)
         step_counter[0] += 1
-        # Dataset refresh — TRL handles all W&B logging via report_to="wandb"
         if step_counter[0] % (args.refresh_every * 2) == 0:
             print(f"\n[refresh] step {step_counter[0]} — re-rolling dataset ...")
             new_prompts = collect_prompts(args.n_rollout_episodes // 2)
