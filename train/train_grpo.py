@@ -1,22 +1,16 @@
 """
-BOARDROOM — GRPO Training Script
-Adapted from TRL's Wordle GRPO notebook.
+BOARDROOM — GRPO Training Script (T4-ready, no HTTP server needed)
 
-Stack:
-  - Qwen 2.5 1.5B (base or instruct)
-  - Unsloth 4-bit LoRA (fits T4-medium 16GB VRAM)
-  - TRL GRPOTrainer
-  - Weights & Biases logging
+The environment runs in-process — no `uv run server` needed.
+BoardroomEnvironment is imported directly and called as a Python object.
 
-Run locally (debug, 10 steps):
-  python train/train_grpo.py --debug
+Run on HF Jobs T4:
+    hf jobs uv run --flavor t4-medium train/train_grpo.py
 
-Run on HF Jobs (full training):
-  hf jobs uv run --flavor t4-medium train/train_grpo.py
-
-Environment must be running:
-  uv run server           # localhost:8000
-  # OR point --env-url at a deployed HF Space
+Override model or steps:
+    hf jobs uv run --flavor t4-medium train/train_grpo.py \\
+        --model-id Qwen/Qwen3.5-4B \\
+        --max-steps 200
 """
 
 import argparse
@@ -26,47 +20,38 @@ import sys
 from pathlib import Path
 from typing import List
 
-# Add parent to path so we can import env client
 sys.path.insert(0, str(Path(__file__).parent.parent))
+
 
 # ------------------------------------------------------------------ #
 # Args                                                                 #
 # ------------------------------------------------------------------ #
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser()
-    p.add_argument("--env-url", default="http://localhost:8000",
-                   help="OpenEnv server URL")
-    p.add_argument("--model-id", default="Qwen/Qwen3.5-4B",
-                   help="HuggingFace model ID")
-    p.add_argument("--output-dir", default="checkpoints/boardroom-grpo",
-                   help="Where to save LoRA adapter")
-    p.add_argument("--run-name", default="boardroom-grpo-v1",
-                   help="W&B run name")
-    p.add_argument("--max-steps", type=int, default=200,
-                   help="Total GRPO training steps")
-    p.add_argument("--batch-size", type=int, default=4,
-                   help="Prompts per step")
-    p.add_argument("--num-generations", type=int, default=8,
-                   help="LLM completions per prompt (GRPO N)")
-    p.add_argument("--max-turns", type=int, default=12,
-                   help="Max game turns per episode")
-    p.add_argument("--debug", action="store_true",
-                   help="10-step smoke test run, no W&B")
+    p.add_argument("--model-id", default="Qwen/Qwen3.5-4B")
+    p.add_argument("--output-dir", default="checkpoints/boardroom-grpo")
+    p.add_argument("--run-name", default="boardroom-grpo-v1")
+    p.add_argument("--max-steps", type=int, default=200)
+    p.add_argument("--batch-size", type=int, default=4)
+    p.add_argument("--num-generations", type=int, default=8)
+    p.add_argument("--refresh-every", type=int, default=50,
+                   help="Re-roll dataset with updated model every N steps")
+    p.add_argument("--n-rollout-episodes", type=int, default=50,
+                   help="Episodes to collect for initial prompt dataset")
     return p.parse_args()
 
 
 # ------------------------------------------------------------------ #
-# Model loading (Unsloth 4-bit for T4 memory budget)                  #
+# Model loading (Unsloth 4-bit → vanilla HF fallback)                 #
 # ------------------------------------------------------------------ #
 def load_model(model_id: str):
-    """Load Qwen with Unsloth 4-bit LoRA. Falls back to vanilla HF if Unsloth not installed."""
     try:
         from unsloth import FastLanguageModel
         model, tokenizer = FastLanguageModel.from_pretrained(
             model_name=model_id,
             max_seq_length=2048,
             load_in_4bit=True,
-            dtype=None,  # auto
+            dtype=None,
         )
         model = FastLanguageModel.get_peft_model(
             model,
@@ -79,9 +64,8 @@ def load_model(model_id: str):
             use_gradient_checkpointing="unsloth",
             random_state=42,
         )
-        print("Loaded with Unsloth 4-bit LoRA")
+        print(f"[model] Unsloth 4-bit LoRA: {model_id}")
     except ImportError:
-        print("Unsloth not installed — falling back to vanilla HF (will use more VRAM)")
         from transformers import AutoModelForCausalLM, AutoTokenizer
         import torch
         tokenizer = AutoTokenizer.from_pretrained(model_id)
@@ -90,6 +74,7 @@ def load_model(model_id: str):
             torch_dtype=torch.bfloat16,
             device_map="auto",
         )
+        print(f"[model] vanilla HF bfloat16: {model_id}")
 
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
@@ -98,269 +83,146 @@ def load_model(model_id: str):
 
 
 # ------------------------------------------------------------------ #
-# Episode rollout — generates (prompt, completion, reward) tuples     #
+# Prompt dataset — rollouts via in-process env (no HTTP)              #
 # ------------------------------------------------------------------ #
-def rollout_episode(
-    loop,
-    env_url: str,
-    max_turns: int,
-    num_generations: int,
-) -> List[dict]:
+def collect_prompts(n_episodes: int) -> List[str]:
     """
-    Run one full game episode (up to max_turns).
-    For each turn, generate num_generations completions.
-    Returns list of dicts: {prompt, completions, rewards}.
-
-    This is what feeds the GRPO update.
+    Run random episodes with BoardroomEnvironment directly.
+    Returns a flat list of observation prompt strings.
+    Each episode produces ~12 prompts (one per turn).
     """
-    from client import BoardroomEnv
-    from models import BoardroomAction, Email, PressRelease
-    from train.action_loop import parse_completion, obs_to_messages, _dict_to_action
+    from server.boardroom_environment import BoardroomEnvironment
+    from models import BoardroomAction
+    import random
 
-    records = []
+    action_pool = [
+        BoardroomAction(action_type="EARNINGS_CALL"),
+        BoardroomAction(action_type="SABOTAGE", action_target="Goldspire Industries"),
+        BoardroomAction(action_type="SABOTAGE", action_target="Sablemark Holdings"),
+        BoardroomAction(action_type="SABOTAGE", action_target="Ironhold Logistics"),
+        BoardroomAction(action_type="PARTNERSHIP", action_target="Goldspire Industries"),
+        BoardroomAction(action_type="PARTNERSHIP", action_target="Sablemark Holdings"),
+        BoardroomAction(action_type="HOLD"),
+    ]
 
-    with BoardroomEnv(base_url=env_url) as env:
+    prompts = []
+    for ep in range(n_episodes):
+        env = BoardroomEnvironment()
         obs = env.reset()
+        while not obs.done:
+            prompts.append(obs.prompt)
+            act = random.choice(action_pool)
+            obs = env.step(act)   # direct env returns obs, not StepResult
+        if (ep + 1) % 10 == 0:
+            print(f"  rollout {ep + 1}/{n_episodes} — {len(prompts)} prompts so far")
 
-        for _ in range(max_turns):
-            if obs.done:
-                break
+    print(f"[dataset] {len(prompts)} prompts from {n_episodes} episodes")
+    return prompts
 
-            prompt = obs.prompt
-            samples = loop.sample(prompt, n=num_generations)
 
-            # Collect rewards for each completion
-            completions_text = []
-            rewards = []
-
-            for raw_text, parse_result in samples:
-                action = _dict_to_action(
-                    parse_result.action_dict,
-                    BoardroomAction, Email, PressRelease,
-                )
-                # Format penalty baked into env reward via parse_failed flag
-                # We DON'T step the real env per-completion — that would advance state.
-                # Instead, we step ONCE with the greedy action, use per-turn reward,
-                # and assign that reward to ALL completions (standard GRPO on-policy trick).
-                completions_text.append(raw_text)
-                rewards.append(None)  # filled below after we step
-
-            # Step env ONCE with greedy (first) completion
-            greedy_parse = samples[0][1]
-            greedy_action = _dict_to_action(
-                greedy_parse.action_dict,
-                BoardroomAction, Email, PressRelease,
-            )
-            step_result = env.step(greedy_action)
-            turn_reward = step_result.reward or 0.0
-
-            # Assign the actual env reward to the greedy completion.
-            # Other completions get scored by parse quality + simulated reward.
-            for i, (raw_text, parse_result) in enumerate(samples):
-                r = turn_reward
-                if not parse_result.parse_ok:
-                    r -= 0.3   # format penalty for non-greedy completions
-                rewards[i] = r
-
-            records.append({
-                "prompt": prompt,
-                "completions": completions_text,
-                "rewards": rewards,
-            })
-
-            obs = step_result.observation
-
-    return records
+def build_hf_dataset(prompts: List[str]):
+    from datasets import Dataset
+    return Dataset.from_list([{"prompt": p} for p in prompts])
 
 
 # ------------------------------------------------------------------ #
-# Reward function (called by GRPOTrainer)                             #
+# Reward function                                                      #
 # ------------------------------------------------------------------ #
-def make_reward_fn(env_url: str, loop):
+def reward_fn(prompts: List[str], completions: List[str], **kwargs) -> List[float]:
     """
-    Factory for TRL's reward_funcs parameter.
+    Score each (prompt, completion) pair.
 
-    GRPOTrainer calls: reward_fn(prompts, completions, **kwargs) -> List[float]
-
-    We maintain a single environment per batch and step it with each completion.
-    Since GRPO generates completions off-policy, we score by:
-      - Parse quality (did it produce valid JSON? correct action type?)
-      - Simulated turn outcome (forward the env state, undo-able since env is stateless)
+    Called by GRPOTrainer every step. We can't step the live env per
+    completion (would advance state for all 8 candidates), so we use
+    a fast heuristic that strongly rewards:
+      - Valid JSON output
+      - Non-HOLD actions (engagement)
+      - Correct target company name
+      - Strategic communication (emails + press)
     """
-    from train.action_loop import parse_completion, _dict_to_action
-    from models import BoardroomAction, Email, PressRelease
+    from train.action_loop import parse_completion
 
-    def reward_fn(prompts: List[str], completions: List[str], **kwargs) -> List[float]:
-        rewards = []
-        for prompt, completion in zip(prompts, completions):
-            parse_result = parse_completion(completion)
+    # Extract known company names from the first prompt (they don't change)
+    COMPANIES = {
+        "Vermillion Capital", "Goldspire Industries",
+        "Sablemark Holdings", "Ironhold Logistics",
+    }
 
-            # Base reward from parse quality
-            if not parse_result.parse_ok:
-                rewards.append(-0.3)
-                continue
+    rewards = []
+    for prompt, completion in zip(prompts, completions):
+        result = parse_completion(completion)
 
-            atype = parse_result.action_dict.get("action_type", "HOLD")
+        if not result.parse_ok:
+            rewards.append(-0.3)
+            continue
 
-            # Heuristic scoring when we can't step the live env per-completion
-            # (stepping the env would change state for other completions)
-            r = 0.0
+        r = 0.0
+        d = result.action_dict
 
-            # Reward informative actions over pure HOLD
-            if atype == "EARNINGS_CALL":
-                r += 0.1
-            elif atype == "SABOTAGE":
-                r += 0.15   # high risk, high reward
-            elif atype == "PARTNERSHIP":
-                r += 0.08
-            # HOLD gets 0 — not punished, just not rewarded
+        # --- Action type ---
+        atype = d.get("action_type", "HOLD")
+        if atype == "EARNINGS_CALL":
+            r += 0.10
+        elif atype == "SABOTAGE":
+            r += 0.20   # high stakes → high signal
+        elif atype == "PARTNERSHIP":
+            r += 0.12
+        # HOLD = 0 (not penalised, just not rewarded — forces model to prefer action)
 
-            # Reward including emails (shows strategic communication)
-            emails = parse_result.action_dict.get("private_emails", [])
-            if emails:
-                r += 0.05 * min(len(emails), 2)
+        # --- Target validity ---
+        target = d.get("action_target")
+        if atype in ("SABOTAGE", "PARTNERSHIP"):
+            if target in COMPANIES and target != "Vermillion Capital":
+                r += 0.10  # correct target
+            else:
+                r -= 0.15  # invalid or self-target
 
-            # Reward press releases
-            if parse_result.action_dict.get("press_release"):
-                r += 0.05
-
-            rewards.append(r)
-
-        return rewards
-
-    return reward_fn
-
-
-# ------------------------------------------------------------------ #
-# Dataset — generates prompts from live env rollouts                  #
-# ------------------------------------------------------------------ #
-class BoardroomRolloutDataset:
-    """
-    HuggingFace-compatible dataset that generates prompts by rolling out
-    the environment with the current model policy.
-
-    Each call to __getitem__ returns a fresh observation prompt.
-    Re-generates every `refresh_every` steps so training stays on-policy.
-    """
-
-    def __init__(self, env_url: str, n_episodes: int = 50):
-        self.env_url = env_url
-        self.n_episodes = n_episodes
-        self._prompts: List[str] = []
-        self._generate_prompts()
-
-    def _generate_prompts(self):
-        """Run random rollouts to collect diverse observation prompts."""
-        from client import BoardroomEnv
-        from models import BoardroomAction
-        import random
-
-        self._prompts = []
-        actions = [
-            BoardroomAction(action_type="EARNINGS_CALL"),
-            BoardroomAction(action_type="SABOTAGE", action_target="Goldspire Industries"),
-            BoardroomAction(action_type="PARTNERSHIP", action_target="Sablemark Holdings"),
-            BoardroomAction(action_type="HOLD"),
-            BoardroomAction(action_type="SABOTAGE", action_target="Ironhold Logistics"),
+        # --- Communication ---
+        emails = d.get("private_emails") or []
+        valid_emails = [
+            e for e in emails
+            if isinstance(e, dict)
+            and e.get("to") in COMPANIES
+            and e.get("text", "").strip()
         ]
+        r += 0.05 * min(len(valid_emails), 2)
 
-        for _ in range(self.n_episodes):
-            try:
-                with BoardroomEnv(base_url=self.env_url) as env:
-                    obs = env.reset()
-                    while not obs.done:
-                        self._prompts.append(obs.prompt)
-                        act = random.choice(actions)
-                        result = env.step(act)
-                        obs = result.observation
-            except Exception as e:
-                print(f"Rollout failed: {e}")
-                continue
+        pr = d.get("press_release")
+        if isinstance(pr, dict) and pr.get("claim", "").strip():
+            r += 0.05
 
-        print(f"Generated {len(self._prompts)} prompts from {self.n_episodes} episodes")
+        rewards.append(round(r, 4))
 
-    def __len__(self) -> int:
-        return len(self._prompts)
-
-    def __getitem__(self, idx: int) -> dict:
-        return {"prompt": self._prompts[idx % len(self._prompts)]}
+    return rewards
 
 
 # ------------------------------------------------------------------ #
-# Plotting (called at end of training)                                 #
-# ------------------------------------------------------------------ #
-def save_plots(log_history: List[dict], output_dir: str) -> None:
-    try:
-        import matplotlib
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-
-        steps = [h["step"] for h in log_history if "step" in h]
-        losses = [h.get("loss", None) for h in log_history if "step" in h]
-        rewards = [h.get("reward", None) for h in log_history if "step" in h]
-
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
-
-        if any(l is not None for l in losses):
-            ax1.plot(steps, [l for l in losses if l is not None])
-            ax1.set_title("Training Loss")
-            ax1.set_xlabel("Step")
-            ax1.set_ylabel("Loss")
-            ax1.grid(True, alpha=0.3)
-
-        if any(r is not None for r in rewards):
-            ax2.plot(steps, [r for r in rewards if r is not None], color="orange")
-            ax2.set_title("Episode Reward")
-            ax2.set_xlabel("Step")
-            ax2.set_ylabel("Reward")
-            ax2.grid(True, alpha=0.3)
-
-        plt.tight_layout()
-        out = Path(output_dir)
-        out.mkdir(parents=True, exist_ok=True)
-        plt.savefig(out / "loss.png", dpi=150, bbox_inches="tight")
-        plt.savefig(out / "reward.png", dpi=150, bbox_inches="tight")
-        print(f"Saved plots to {output_dir}/")
-    except ImportError:
-        print("matplotlib not installed — skipping plots")
-
-
-# ------------------------------------------------------------------ #
-# Main                                                                 #
+# Training                                                             #
 # ------------------------------------------------------------------ #
 def main():
     args = parse_args()
 
-    if args.debug:
-        args.max_steps = 10
-        args.batch_size = 2
-        args.num_generations = 4
-        os.environ.setdefault("WANDB_MODE", "disabled")
-        print("DEBUG MODE — 10 steps, W&B disabled")
+    # -- W&B init --
+    # HF Jobs: set WANDB_API_KEY via `hf jobs secrets set WANDB_API_KEY <key>`
+    # Local: `wandb login` or export WANDB_API_KEY=...
+    _init_wandb(args)
 
-    # -- Load model --
-    print(f"Loading {args.model_id} ...")
+    print(f"[config] model={args.model_id} steps={args.max_steps} "
+          f"batch={args.batch_size} gens={args.num_generations}")
+
+    # -- Model --
     model, tokenizer = load_model(args.model_id)
 
-    # -- Build action loop --
-    from train.action_loop import ActionLoop
-    loop = ActionLoop(model, tokenizer)
+    # -- Initial dataset --
+    print("[dataset] collecting rollout prompts ...")
+    prompts = collect_prompts(args.n_rollout_episodes)
+    dataset = build_hf_dataset(prompts)
 
-    # -- Build dataset from env rollouts --
-    print(f"Rolling out environment at {args.env_url} ...")
-    n_episodes = 5 if args.debug else 50
-    dataset = BoardroomRolloutDataset(args.env_url, n_episodes=n_episodes)
-
-    if len(dataset) == 0:
-        print("ERROR: No prompts generated. Is the server running?")
-        print(f"  uv run server   (then retry)")
-        sys.exit(1)
-
-    # -- Configure GRPO --
+    # -- GRPO config --
     try:
         from trl import GRPOConfig, GRPOTrainer
     except ImportError:
-        print("TRL not installed. Run: pip install trl>=0.12.0")
+        print("ERROR: trl not installed. Check pyproject.toml [train] deps.")
         sys.exit(1)
 
     config = GRPOConfig(
@@ -369,21 +231,18 @@ def main():
         max_steps=args.max_steps,
         per_device_train_batch_size=args.batch_size,
         num_generations=args.num_generations,
-        gradient_accumulation_steps=1,
+        gradient_accumulation_steps=2,
         learning_rate=5e-6,
         lr_scheduler_type="cosine",
         warmup_ratio=0.05,
         bf16=True,
         logging_steps=1,
         save_steps=50,
-        report_to="wandb" if not args.debug else "none",
-        # GRPO-specific
+        report_to="wandb",
         max_new_tokens=512,
         temperature=0.8,
         top_p=0.95,
     )
-
-    reward_fn = make_reward_fn(args.env_url, loop)
 
     trainer = GRPOTrainer(
         model=model,
@@ -393,29 +252,163 @@ def main():
         train_dataset=dataset,
     )
 
+    # -- Dataset refresh callback --
+    # Every `refresh_every` steps: re-roll with updated model policy
+    # so training stays on-policy as the model improves
+    original_step = trainer.training_step
+
+    step_counter = [0]
+
+    def patched_step(*a, **kw):
+        loss = original_step(*a, **kw)
+        step_counter[0] += 1
+
+        # Log to W&B directly (GRPOTrainer logs loss but not always reward)
+        try:
+            import wandb
+            if wandb.run:
+                log = {"train/step": step_counter[0], "train/loss": float(loss)}
+                history = trainer.state.log_history
+                if history:
+                    last = history[-1]
+                    if "reward" in last:
+                        log["train/reward"] = last["reward"]
+                wandb.log(log, step=step_counter[0])
+        except Exception:
+            pass
+
+        if step_counter[0] % args.refresh_every == 0:
+            print(f"\n[refresh] step {step_counter[0]} — re-rolling dataset ...")
+            new_prompts = collect_prompts(args.n_rollout_episodes // 2)
+            trainer.train_dataset = build_hf_dataset(new_prompts)
+            print(f"[refresh] done — {len(new_prompts)} new prompts\n")
+        return loss
+
+    trainer.training_step = patched_step
+
     # -- Train --
-    print(f"Starting GRPO training ({args.max_steps} steps) ...")
+    print(f"[train] starting {args.max_steps} steps ...")
     trainer.train()
 
-    # -- Save adapter --
+    # -- Save --
     out = Path(args.output_dir)
     out.mkdir(parents=True, exist_ok=True)
     model.save_pretrained(out / "lora_adapter")
     tokenizer.save_pretrained(out / "lora_adapter")
-    print(f"Adapter saved to {out / 'lora_adapter'}")
+    print(f"[save] adapter → {out / 'lora_adapter'}")
 
-    # -- Save plots --
-    save_plots(trainer.state.log_history, str(out))
+    # -- Plots --
+    _save_plots(trainer.state.log_history, out)
 
-    # -- Save W&B summary --
+    # -- Summary --
+    history = trainer.state.log_history
     summary = {
-        "total_steps": args.max_steps,
+        "steps": args.max_steps,
         "model_id": args.model_id,
-        "final_loss": trainer.state.log_history[-1].get("loss") if trainer.state.log_history else None,
-        "final_reward": trainer.state.log_history[-1].get("reward") if trainer.state.log_history else None,
+        "final_loss": next((h["loss"] for h in reversed(history) if "loss" in h), None),
+        "final_reward": next((h.get("reward") for h in reversed(history) if "reward" in h), None),
     }
     (out / "summary.json").write_text(json.dumps(summary, indent=2))
     print(json.dumps(summary, indent=2))
+
+    # -- Upload plots to W&B --
+    _wandb_finish(out, summary)
+
+
+# ------------------------------------------------------------------ #
+# W&B helpers                                                          #
+# ------------------------------------------------------------------ #
+def _init_wandb(args: argparse.Namespace) -> None:
+    try:
+        import wandb
+        wandb.init(
+            project=os.environ.get("WANDB_PROJECT", "boardroom"),
+            name=args.run_name,
+            config={
+                "model_id": args.model_id,
+                "max_steps": args.max_steps,
+                "batch_size": args.batch_size,
+                "num_generations": args.num_generations,
+                "refresh_every": args.refresh_every,
+                "n_rollout_episodes": args.n_rollout_episodes,
+                "env": "boardroom-l1",
+                "companies": 4,
+                "max_turns": 12,
+                "algorithm": "GRPO",
+            },
+        )
+        print(f"[wandb] run: {wandb.run.url}")
+    except ImportError:
+        print("[wandb] not installed — skipping")
+    except Exception as e:
+        print(f"[wandb] init failed ({e}) — training continues without W&B")
+
+
+def _wandb_finish(out: Path, summary: dict) -> None:
+    try:
+        import wandb
+        if wandb.run is None:
+            return
+
+        # Log final metrics
+        wandb.summary.update(summary)
+
+        # Upload plot PNGs as W&B artifacts
+        artifact = wandb.Artifact("training-plots", type="results")
+        for png in ["loss.png", "reward.png"]:
+            p = out / png
+            if p.exists():
+                artifact.add_file(str(p))
+                wandb.log({png.replace(".png", ""): wandb.Image(str(p))})
+        wandb.log_artifact(artifact)
+
+        # Upload adapter as artifact
+        adapter_dir = out / "lora_adapter"
+        if adapter_dir.exists():
+            model_artifact = wandb.Artifact("lora-adapter", type="model")
+            model_artifact.add_dir(str(adapter_dir))
+            wandb.log_artifact(model_artifact)
+
+        wandb.finish()
+        print(f"[wandb] finished — {wandb.run.url}")
+    except Exception as e:
+        print(f"[wandb] finish failed: {e}")
+
+
+# ------------------------------------------------------------------ #
+# Plots                                                                #
+# ------------------------------------------------------------------ #
+def _save_plots(history: list, out: Path) -> None:
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        steps   = [h["step"] for h in history if "step" in h]
+        losses  = [h["loss"] for h in history if "loss" in h]
+        rewards = [h["reward"] for h in history if "reward" in h]
+
+        fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+        fig.suptitle("BOARDROOM GRPO Training", fontsize=13)
+
+        if losses:
+            axes[0].plot(steps[:len(losses)], losses, color="#e05c5c")
+            axes[0].set_title("Loss")
+            axes[0].set_xlabel("Step")
+            axes[0].grid(alpha=0.3)
+
+        if rewards:
+            axes[1].plot(steps[:len(rewards)], rewards, color="#5ca8e0")
+            axes[1].set_title("Reward")
+            axes[1].set_xlabel("Step")
+            axes[1].grid(alpha=0.3)
+
+        plt.tight_layout()
+        plt.savefig(out / "loss.png", dpi=150, bbox_inches="tight")
+        plt.savefig(out / "reward.png", dpi=150, bbox_inches="tight")
+        print(f"[plots] saved to {out}/")
+    except ImportError:
+        print("[plots] matplotlib not available — skipping")
 
 
 if __name__ == "__main__":
