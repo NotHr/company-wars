@@ -35,12 +35,19 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List
 
-# HF Jobs copies the script to // — resolve real path so imports work.
-_SCRIPT    = Path(__file__).resolve()
-_TRAIN_DIR = _SCRIPT.parent
-_REPO_DIR  = _TRAIN_DIR.parent
-sys.path.insert(0, str(_REPO_DIR))
-sys.path.insert(0, str(_TRAIN_DIR))
+# HF Jobs copies the script to // — resolve real path and walk up until
+# we find the repo root (identified by models.py existing there).
+_SCRIPT = Path(__file__).resolve()
+_SEARCH = _SCRIPT.parent
+for _ in range(5):
+    if (_SEARCH / "models.py").exists():
+        break
+    _SEARCH = _SEARCH.parent
+_REPO_DIR  = _SEARCH
+_TRAIN_DIR = _REPO_DIR / "train"
+for _p in [str(_REPO_DIR), str(_TRAIN_DIR)]:
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 # ------------------------------------------------------------------ #
 # Inlined from action_loop.py — self-contained for HF Jobs            #
