@@ -690,6 +690,36 @@ COMPANIES = {
     "Sablemark Holdings", "Ironhold Logistics",
 }
 
+# Per-prompt env cache so each GRPO batch reuses the same game state
+# key: prompt text → BoardroomObservation (holds the live env + obs)
+_ENV_CACHE: Dict[str, Any] = {}
+_ENV_LOCK_IMPORT = False
+
+
+def _get_action_from_dict(d: Dict[str, Any]) -> BoardroomAction:
+    emails = []
+    for e in (d.get("private_emails") or [])[:2]:
+        if isinstance(e, dict) and e.get("to") and e.get("text"):
+            try:
+                emails.append(Email(to=str(e["to"]), text=str(e["text"])[:500]))
+            except Exception:
+                pass
+    press = None
+    pr = d.get("press_release")
+    if isinstance(pr, dict) and pr.get("claim"):
+        try:
+            press = PressRelease(claim=str(pr["claim"])[:500],
+                                 marked_truthful=bool(pr.get("marked_truthful", True)))
+        except Exception:
+            pass
+    return BoardroomAction(
+        private_emails=emails,
+        press_release=press,
+        action_type=d.get("action_type", "HOLD"),
+        action_target=d.get("action_target"),
+    )
+
+
 def reward_fn(prompts, completions, **kwargs) -> List[float]:
     rewards = []
     for prompt, completion in zip(prompts, completions):
@@ -698,38 +728,57 @@ def reward_fn(prompts, completions, **kwargs) -> List[float]:
             completion = completion[-1].get("content", "") if completion else ""
         elif isinstance(completion, dict):
             completion = completion.get("content", "")
-        result = parse_completion(str(completion))
+        completion = str(completion)
+
+        result = parse_completion(completion)
+
+        # ── Format penalty (parse failed) ──────────────────────────────
         if not result.parse_ok:
-            rewards.append(-0.3)
+            rewards.append(-1.0)
             continue
-        r = 0.0
+
         d = result.action_dict
         atype  = d.get("action_type", "HOLD")
         target = d.get("action_target")
 
-        if   atype == "SABOTAGE":      r += 0.20
-        elif atype == "PARTNERSHIP":   r += 0.12
-        elif atype == "EARNINGS_CALL": r += 0.10
-
-        if atype in ("SABOTAGE", "PARTNERSHIP"):
-            if target in COMPANIES and target != "Vermillion Capital":
-                r += 0.10
-            else:
-                r -= 0.15
-
-        emails = [
+        # ── Format quality score (0–0.2) ───────────────────────────────
+        fmt = 0.0
+        emails_ok = [
             e for e in (d.get("private_emails") or [])
             if isinstance(e, dict)
             and e.get("to") in COMPANIES
             and str(e.get("text", "")).strip()
         ]
-        r += 0.05 * min(len(emails), 2)
-
+        fmt += 0.05 * min(len(emails_ok), 2)
         pr = d.get("press_release")
         if isinstance(pr, dict) and str(pr.get("claim", "")).strip():
-            r += 0.05
+            fmt += 0.05
 
-        rewards.append(round(r, 4))
+        # ── Environment step reward ─────────────────────────────────────
+        # Run the parsed action through a fresh single-step env to get
+        # the actual game reward (market share, cash, sabotage outcome).
+        # This gives GRPO a dense, varied signal beyond just format.
+        env_reward = 0.0
+        try:
+            env = BoardroomEnvironment()
+            env.reset()
+            action = _get_action_from_dict(d)
+            obs = env.step(action)
+            # Normalise: env reward typically in [-2, 1] range per step
+            env_reward = float(obs.reward) * 0.5
+        except Exception:
+            pass
+
+        # ── Strategy bonus ──────────────────────────────────────────────
+        strat = 0.0
+        if atype in ("SABOTAGE", "PARTNERSHIP"):
+            if target in COMPANIES and target != "Vermillion Capital":
+                strat += 0.1
+            else:
+                strat -= 0.2   # invalid/self-target is a real mistake
+
+        total = round(fmt + env_reward + strat, 4)
+        rewards.append(total)
     return rewards
 
 
@@ -774,8 +823,9 @@ def _wandb_finish(out: Path, summary: dict) -> None:
             m = wandb.Artifact("lora-adapter", type="model")
             m.add_dir(str(adapter))
             wandb.log_artifact(m)
+        run_url = wandb.run.url
         wandb.finish()
-        print(f"[wandb] done — {wandb.run.url}")
+        print(f"[wandb] done — {run_url}")
     except Exception as e:
         print(f"[wandb] finish error — {e}")
 
