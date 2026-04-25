@@ -18,7 +18,7 @@ from uuid import uuid4
 from openenv.core.env_server.interfaces import Environment
 from openenv.core.env_server.types import State
 
-from .companies import L2_COMPANIES, STARTING_STATS
+from .companies import L2_COMPANIES, L2_STARTING_STATS
 from .game_logic import CompanyState, TurnAction, TurnResult, resolve_turn
 from .reward import compute_terminal_reward
 
@@ -58,11 +58,11 @@ class BoardroomEnvironment(Environment):
             self._companies[defn["name"]] = CompanyState(
                 name=defn["name"],
                 sector=defn["sector"],
-                cash=STARTING_STATS["cash"],
-                market_share=STARTING_STATS["market_share"],
-                stock_price=STARTING_STATS["stock_price"],
-                reputation=STARTING_STATS["reputation"],
-                starting_cash=STARTING_STATS["cash"],
+                cash=L2_STARTING_STATS["cash"],
+                market_share=L2_STARTING_STATS["market_share"],
+                stock_price=L2_STARTING_STATS["stock_price"],
+                reputation=L2_STARTING_STATS["reputation"],
+                starting_cash=L2_STARTING_STATS["cash"],
             )
 
         return self._make_observation(done=False, reward=0.0)

@@ -43,12 +43,21 @@ L2_COMPANIES: List[Dict] = [
     {"name": "Medvault Health",     "sector": "Healthcare"},
 ]
 
-STARTING_STATS = {
+L1_STARTING_STATS = {
+    "cash": 50_000_000.0,
+    "market_share": 100.0 / len(L1_COMPANIES),  # 25.0 for 4 companies
+    "stock_price": 100.0,
+    "reputation": 0.70,
+}
+
+L2_STARTING_STATS = {
     "cash": 50_000_000.0,
     "market_share": 100.0 / len(L2_COMPANIES),  # ≈14.2857 for 7 companies
     "stock_price": 100.0,
     "reputation": 0.70,
 }
 
+STARTING_STATS = L2_STARTING_STATS  # backward compat
+
 # Used by game_logic formulas that normalise against starting share.
-MARKET_SHARE_BASELINE: float = STARTING_STATS["market_share"]
+MARKET_SHARE_BASELINE: float = L2_STARTING_STATS["market_share"]
