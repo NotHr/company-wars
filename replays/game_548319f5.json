@@ -1,0 +1,614 @@
+[
+  {
+    "turn": 1,
+    "actions": {
+      "Vermillion Capital": {
+        "type": "SABOTAGE",
+        "target": "Goldspire Industries"
+      },
+      "Goldspire Industries": {
+        "type": "EARNINGS_CALL",
+        "target": null
+      },
+      "Sablemark Holdings": {
+        "type": "SABOTAGE",
+        "target": "Vermillion Capital"
+      },
+      "Ironhold Logistics": {
+        "type": "HOLD",
+        "target": null
+      }
+    },
+    "stats": {
+      "Vermillion Capital": {
+        "cash": 39790080.0,
+        "stock": 89.18,
+        "market_share": 24.0,
+        "reputation": 0.7,
+        "alive": true
+      },
+      "Goldspire Industries": {
+        "cash": 41192700.0,
+        "stock": 97.56,
+        "market_share": 23.5,
+        "reputation": 0.7,
+        "alive": true
+      },
+      "Sablemark Holdings": {
+        "cash": 44224400.0,
+        "stock": 108.29,
+        "market_share": 25.5,
+        "reputation": 0.7,
+        "alive": true
+      },
+      "Ironhold Logistics": {
+        "cash": 49245000.0,
+        "stock": 111.2,
+        "market_share": 25.0,
+        "reputation": 0.7,
+        "alive": true
+      }
+    }
+  },
+  {
+    "turn": 2,
+    "actions": {
+      "Vermillion Capital": {
+        "type": "EARNINGS_CALL",
+        "target": null
+      },
+      "Goldspire Industries": {
+        "type": "PARTNERSHIP",
+        "target": "Sablemark Holdings"
+      },
+      "Sablemark Holdings": {
+        "type": "HOLD",
+        "target": null
+      },
+      "Ironhold Logistics": {
+        "type": "EARNINGS_CALL",
+        "target": null
+      }
+    },
+    "stats": {
+      "Vermillion Capital": {
+        "cash": 42873899.6224,
+        "stock": 102.19,
+        "market_share": 24.0,
+        "reputation": 0.7,
+        "alive": true
+      },
+      "Goldspire Industries": {
+        "cash": 40381605.69,
+        "stock": 105.1,
+        "market_share": 23.5,
+        "reputation": 0.7,
+        "alive": true
+      },
+      "Sablemark Holdings": {
+        "cash": 43444844.44,
+        "stock": 118.32,
+        "market_share": 25.5,
+        "reputation": 0.7,
+        "alive": true
+      },
+      "Ironhold Logistics": {
+        "cash": 48486225.0,
+        "stock": 134.2,
+        "market_share": 25.0,
+        "reputation": 0.7,
+        "alive": true
+      }
+    }
+  },
+  {
+    "turn": 3,
+    "actions": {
+      "Vermillion Capital": {
+        "type": "SABOTAGE",
+        "target": "Goldspire Industries"
+      },
+      "Goldspire Industries": {
+        "type": "PARTNERSHIP",
+        "target": "Vermillion Capital"
+      },
+      "Sablemark Holdings": {
+        "type": "HOLD",
+        "target": null
+      },
+      "Ironhold Logistics": {
+        "type": "HOLD",
+        "target": null
+      }
+    },
+    "stats": {
+      "Vermillion Capital": {
+        "cash": 40755983.774646275,
+        "stock": 107.64,
+        "market_share": 24.0,
+        "reputation": 0.7,
+        "alive": true
+      },
+      "Goldspire Industries": {
+        "cash": 39566699.236742996,
+        "stock": 110.38,
+        "market_share": 23.5,
+        "reputation": 0.7,
+        "alive": true
+      },
+      "Sablemark Holdings": {
+        "cash": 42661313.146643996,
+        "stock": 130.26,
+        "market_share": 25.5,
+        "reputation": 0.7,
+        "alive": true
+      },
+      "Ironhold Logistics": {
+        "cash": 47723656.125,
+        "stock": 147.77,
+        "market_share": 25.0,
+        "reputation": 0.7,
+        "alive": true
+      }
+    }
+  },
+  {
+    "turn": 4,
+    "actions": {
+      "Vermillion Capital": {
+        "type": "SABOTAGE",
+        "target": "Goldspire Industries"
+      },
+      "Goldspire Industries": {
+        "type": "HOLD",
+        "target": null
+      },
+      "Sablemark Holdings": {
+        "type": "HOLD",
+        "target": null
+      },
+      "Ironhold Logistics": {
+        "type": "HOLD",
+        "target": null
+      }
+    },
+    "stats": {
+      "Vermillion Capital": {
+        "cash": 38415093.74644104,
+        "stock": 119.04,
+        "market_share": 24.0,
+        "reputation": 0.55,
+        "alive": true
+      },
+      "Goldspire Industries": {
+        "cash": 38747962.723155685,
+        "stock": 118.99,
+        "market_share": 23.5,
+        "reputation": 0.7,
+        "alive": true
+      },
+      "Sablemark Holdings": {
+        "cash": 41873785.84369188,
+        "stock": 138.74,
+        "market_share": 25.5,
+        "reputation": 0.7,
+        "alive": true
+      },
+      "Ironhold Logistics": {
+        "cash": 46957274.405625,
+        "stock": 158.21,
+        "market_share": 25.0,
+        "reputation": 0.7,
+        "alive": true
+      }
+    }
+  },
+  {
+    "turn": 5,
+    "actions": {
+      "Vermillion Capital": {
+        "type": "PARTNERSHIP",
+        "target": "Sablemark Holdings"
+      },
+      "Goldspire Industries": {
+        "type": "SABOTAGE",
+        "target": "Ironhold Logistics"
+      },
+      "Sablemark Holdings": {
+        "type": "HOLD",
+        "target": null
+      },
+      "Ironhold Logistics": {
+        "type": "HOLD",
+        "target": null
+      }
+    },
+    "stats": {
+      "Vermillion Capital": {
+        "cash": 41354154.816066355,
+        "stock": 123.44,
+        "market_share": 24.0,
+        "reputation": 0.55,
+        "alive": true
+      },
+      "Goldspire Industries": {
+        "cash": 33909952.94422683,
+        "stock": 122.68,
+        "market_share": 24.0,
+        "reputation": 0.7,
+        "alive": true
+      },
+      "Sablemark Holdings": {
+        "cash": 41082242.151494704,
+        "stock": 151.04,
+        "market_share": 25.5,
+        "reputation": 0.7,
+        "alive": true
+      },
+      "Ironhold Logistics": {
+        "cash": 39743193.59533144,
+        "stock": 152.12,
+        "market_share": 23.5,
+        "reputation": 0.7,
+        "alive": true
+      }
+    }
+  },
+  {
+    "turn": 6,
+    "actions": {
+      "Vermillion Capital": {
+        "type": "PARTNERSHIP",
+        "target": "Sablemark Holdings"
+      },
+      "Goldspire Industries": {
+        "type": "SABOTAGE",
+        "target": "Ironhold Logistics"
+      },
+      "Sablemark Holdings": {
+        "type": "EARNINGS_CALL",
+        "target": null
+      },
+      "Ironhold Logistics": {
+        "type": "EARNINGS_CALL",
+        "target": null
+      }
+    },
+    "stats": {
+      "Vermillion Capital": {
+        "cash": 44602640.23510183,
+        "stock": 135.99,
+        "market_share": 24.0,
+        "reputation": 0.55,
+        "alive": true
+      },
+      "Goldspire Industries": {
+        "cash": 29048720.71835912,
+        "stock": 129.06,
+        "market_share": 24.0,
+        "reputation": 0.7,
+        "alive": true
+      },
+      "Sablemark Holdings": {
+        "cash": 40286661.586467326,
+        "stock": 179.02,
+        "market_share": 25.5,
+        "reputation": 0.7,
+        "alive": true
+      },
+      "Ironhold Logistics": {
+        "cash": 38925286.6052295,
+        "stock": 179.69,
+        "market_share": 23.5,
+        "reputation": 0.7,
+        "alive": true
+      }
+    }
+  },
+  {
+    "turn": 7,
+    "actions": {
+      "Vermillion Capital": {
+        "type": "PARTNERSHIP",
+        "target": "Sablemark Holdings"
+      },
+      "Goldspire Industries": {
+        "type": "HOLD",
+        "target": null
+      },
+      "Sablemark Holdings": {
+        "type": "HOLD",
+        "target": null
+      },
+      "Ironhold Logistics": {
+        "type": "HOLD",
+        "target": null
+      }
+    },
+    "stats": {
+      "Vermillion Capital": {
+        "cash": 48193126.199053355,
+        "stock": 148.16,
+        "market_share": 24.0,
+        "reputation": 0.55,
+        "alive": true
+      },
+      "Goldspire Industries": {
+        "cash": 28183354.577807244,
+        "stock": 135.3,
+        "market_share": 24.0,
+        "reputation": 0.7,
+        "alive": true
+      },
+      "Sablemark Holdings": {
+        "cash": 39487023.56055831,
+        "stock": 186.97,
+        "market_share": 25.5,
+        "reputation": 0.7,
+        "alive": true
+      },
+      "Ironhold Logistics": {
+        "cash": 38103535.45227408,
+        "stock": 194.17,
+        "market_share": 23.5,
+        "reputation": 0.7,
+        "alive": true
+      }
+    }
+  },
+  {
+    "turn": 8,
+    "actions": {
+      "Vermillion Capital": {
+        "type": "HOLD",
+        "target": null
+      },
+      "Goldspire Industries": {
+        "type": "HOLD",
+        "target": null
+      },
+      "Sablemark Holdings": {
+        "type": "HOLD",
+        "target": null
+      },
+      "Ironhold Logistics": {
+        "type": "HOLD",
+        "target": null
+      }
+    },
+    "stats": {
+      "Vermillion Capital": {
+        "cash": 52161618.52528969,
+        "stock": 160.09,
+        "market_share": 24.0,
+        "reputation": 0.55,
+        "alive": true
+      },
+      "Goldspire Industries": {
+        "cash": 27313834.679780718,
+        "stock": 142.79,
+        "market_share": 24.0,
+        "reputation": 0.7,
+        "alive": true
+      },
+      "Sablemark Holdings": {
+        "cash": 38683307.38071716,
+        "stock": 194.4,
+        "market_share": 25.5,
+        "reputation": 0.7,
+        "alive": true
+      },
+      "Ironhold Logistics": {
+        "cash": 37277922.068899766,
+        "stock": 208.47,
+        "market_share": 23.5,
+        "reputation": 0.7,
+        "alive": true
+      }
+    }
+  },
+  {
+    "turn": 9,
+    "actions": {
+      "Vermillion Capital": {
+        "type": "SABOTAGE",
+        "target": "Goldspire Industries"
+      },
+      "Goldspire Industries": {
+        "type": "HOLD",
+        "target": null
+      },
+      "Sablemark Holdings": {
+        "type": "EARNINGS_CALL",
+        "target": null
+      },
+      "Ironhold Logistics": {
+        "type": "SABOTAGE",
+        "target": "Sablemark Holdings"
+      }
+    },
+    "stats": {
+      "Vermillion Capital": {
+        "cash": 51026591.50166998,
+        "stock": 168.31,
+        "market_share": 24.5,
+        "reputation": 0.55,
+        "alive": true
+      },
+      "Goldspire Industries": {
+        "cash": 18396246.93583973,
+        "stock": 129.22,
+        "market_share": 22.5,
+        "reputation": 0.7,
+        "alive": true
+      },
+      "Sablemark Holdings": {
+        "cash": 29825787.2561446,
+        "stock": 189.64,
+        "market_share": 24.0,
+        "reputation": 0.7,
+        "alive": true
+      },
+      "Ironhold Logistics": {
+        "cash": 31428056.094830483,
+        "stock": 217.67,
+        "market_share": 24.0,
+        "reputation": 0.7,
+        "alive": true
+      }
+    }
+  },
+  {
+    "turn": 10,
+    "actions": {
+      "Vermillion Capital": {
+        "type": "PARTNERSHIP",
+        "target": "Sablemark Holdings"
+      },
+      "Goldspire Industries": {
+        "type": "HOLD",
+        "target": null
+      },
+      "Sablemark Holdings": {
+        "type": "PARTNERSHIP",
+        "target": "Vermillion Capital"
+      },
+      "Ironhold Logistics": {
+        "type": "EARNINGS_CALL",
+        "target": null
+      }
+    },
+    "stats": {
+      "Vermillion Capital": {
+        "cash": 55298893.98003098,
+        "stock": 185.32,
+        "market_share": 24.5,
+        "reputation": 0.55,
+        "alive": true
+      },
+      "Goldspire Industries": {
+        "cash": 17474530.04705101,
+        "stock": 133.7,
+        "market_share": 22.5,
+        "reputation": 0.7,
+        "alive": true
+      },
+      "Sablemark Holdings": {
+        "cash": 28964151.034974094,
+        "stock": 203.64,
+        "market_share": 24.0,
+        "reputation": 0.7,
+        "alive": true
+      },
+      "Ironhold Logistics": {
+        "cash": 30574110.76408567,
+        "stock": 254.0,
+        "market_share": 24.0,
+        "reputation": 0.7,
+        "alive": true
+      }
+    }
+  },
+  {
+    "turn": 11,
+    "actions": {
+      "Vermillion Capital": {
+        "type": "SABOTAGE",
+        "target": "Goldspire Industries"
+      },
+      "Goldspire Industries": {
+        "type": "EARNINGS_CALL",
+        "target": null
+      },
+      "Sablemark Holdings": {
+        "type": "PARTNERSHIP",
+        "target": "Ironhold Logistics"
+      },
+      "Ironhold Logistics": {
+        "type": "HOLD",
+        "target": null
+      }
+    },
+    "stats": {
+      "Vermillion Capital": {
+        "cash": 54499927.29492426,
+        "stock": 201.01,
+        "market_share": 25.0,
+        "reputation": 0.55,
+        "alive": true
+      },
+      "Goldspire Industries": {
+        "cash": 8510123.073248623,
+        "stock": 131.73,
+        "market_share": 21.0,
+        "reputation": 0.7,
+        "alive": true
+      },
+      "Sablemark Holdings": {
+        "cash": 28098378.95994197,
+        "stock": 215.0,
+        "market_share": 24.0,
+        "reputation": 0.7,
+        "alive": true
+      },
+      "Ironhold Logistics": {
+        "cash": 29716066.49575328,
+        "stock": 274.91,
+        "market_share": 24.0,
+        "reputation": 0.7,
+        "alive": true
+      }
+    }
+  },
+  {
+    "turn": 12,
+    "actions": {
+      "Vermillion Capital": {
+        "type": "PARTNERSHIP",
+        "target": "Sablemark Holdings"
+      },
+      "Goldspire Industries": {
+        "type": "HOLD",
+        "target": null
+      },
+      "Sablemark Holdings": {
+        "type": "HOLD",
+        "target": null
+      },
+      "Ironhold Logistics": {
+        "type": "HOLD",
+        "target": null
+      }
+    },
+    "stats": {
+      "Vermillion Capital": {
+        "cash": 59144169.62453878,
+        "stock": 226.18,
+        "market_share": 25.0,
+        "reputation": 0.55,
+        "alive": true
+      },
+      "Goldspire Industries": {
+        "cash": 7541665.590156267,
+        "stock": 127.49,
+        "market_share": 21.0,
+        "reputation": 0.7,
+        "alive": true
+      },
+      "Sablemark Holdings": {
+        "cash": 27228451.17894969,
+        "stock": 222.67,
+        "market_share": 24.0,
+        "reputation": 0.7,
+        "alive": true
+      },
+      "Ironhold Logistics": {
+        "cash": 28853903.614932895,
+        "stock": 294.44,
+        "market_share": 24.0,
+        "reputation": 0.7,
+        "alive": true
+      }
+    }
+  }
+]
