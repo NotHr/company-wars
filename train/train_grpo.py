@@ -690,10 +690,15 @@ COMPANIES = {
     "Sablemark Holdings", "Ironhold Logistics",
 }
 
-def reward_fn(prompts: List[str], completions: List[str], **kwargs) -> List[float]:
+def reward_fn(prompts, completions, **kwargs) -> List[float]:
     rewards = []
     for prompt, completion in zip(prompts, completions):
-        result = parse_completion(completion)
+        # GRPOTrainer passes completions as message dicts when prompts are message lists
+        if isinstance(completion, list):
+            completion = completion[-1].get("content", "") if completion else ""
+        elif isinstance(completion, dict):
+            completion = completion.get("content", "")
+        result = parse_completion(str(completion))
         if not result.parse_ok:
             rewards.append(-0.3)
             continue
