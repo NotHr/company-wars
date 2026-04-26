@@ -18,7 +18,7 @@ from uuid import uuid4
 from openenv.core.env_server.interfaces import Environment
 from openenv.core.env_server.types import State
 
-from .companies import L1_COMPANIES, STARTING_STATS
+from .companies import L2_COMPANIES, L2_STARTING_STATS
 from .game_logic import CompanyState, TurnAction, TurnResult, resolve_turn
 from .reward import compute_terminal_reward
 
@@ -54,15 +54,15 @@ class BoardroomEnvironment(Environment):
         self._rng = random.Random(random.randint(0, 2**32))
 
         self._companies = {}
-        for defn in L1_COMPANIES:
+        for defn in L2_COMPANIES:
             self._companies[defn["name"]] = CompanyState(
                 name=defn["name"],
                 sector=defn["sector"],
-                cash=STARTING_STATS["cash"],
-                market_share=STARTING_STATS["market_share"],
-                stock_price=STARTING_STATS["stock_price"],
-                reputation=STARTING_STATS["reputation"],
-                starting_cash=STARTING_STATS["cash"],
+                cash=L2_STARTING_STATS["cash"],
+                market_share=L2_STARTING_STATS["market_share"],
+                stock_price=L2_STARTING_STATS["stock_price"],
+                reputation=L2_STARTING_STATS["reputation"],
+                starting_cash=L2_STARTING_STATS["cash"],
             )
 
         return self._make_observation(done=False, reward=0.0)
@@ -136,7 +136,7 @@ class BoardroomEnvironment(Environment):
                 target = None
                 parse_failed = True
 
-        if atype in ("SABOTAGE", "PARTNERSHIP") and not target:
+        if atype in ("SABOTAGE", "PARTNERSHIP", "PROPOSE_MERGER") and not target:
             atype = "HOLD"
             parse_failed = True
 
@@ -160,6 +160,8 @@ class BoardroomEnvironment(Environment):
             atype, target = "SABOTAGE", self._rng.choice(alive_others)
         elif r < 0.45 and alive_others:
             atype, target = "PARTNERSHIP", self._rng.choice(alive_others)
+        elif r < 0.52 and alive_others:
+            atype, target = "PROPOSE_MERGER", self._rng.choice(alive_others)
         else:
             atype, target = "HOLD", None
 
@@ -319,7 +321,7 @@ def _build_prompt(
 
     lines += [
         "",
-        "ACTIONS: EARNINGS_CALL | SABOTAGE <target> | PARTNERSHIP <target> | HOLD",
+        "ACTIONS: EARNINGS_CALL | SABOTAGE <target> | PARTNERSHIP <target> | PROPOSE_MERGER <target> | HOLD",
         "You may also send up to 2 private emails and 1 press release.",
         "",
         "Respond with ONLY valid JSON (no other text):",

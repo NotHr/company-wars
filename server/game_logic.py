@@ -8,7 +8,7 @@ import random
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
-from .companies import SECTOR_TRAITS
+from .companies import MARKET_SHARE_BASELINE, SECTOR_TRAITS
 
 
 @dataclass
@@ -38,7 +38,7 @@ class TurnAction:
     company_name: str
     private_emails: List[Dict]
     press_release: Optional[Dict]
-    action_type: str   # EARNINGS_CALL | SABOTAGE | PARTNERSHIP | HOLD
+    action_type: str   # EARNINGS_CALL | SABOTAGE | PARTNERSHIP | PROPOSE_MERGER | HOLD
     action_target: Optional[str]
     parse_failed: bool = False
 
@@ -105,6 +105,7 @@ def resolve_turn(
 
     # --- Phase 2: Strategic actions (resolved simultaneously) ---
     partnership_proposals: Dict[str, str] = {}  # proposer → target
+    merger_proposals: Dict[str, str] = {}        # proposer → target
 
     for name, action in actions.items():
         company = companies[name]
@@ -143,6 +144,11 @@ def resolve_turn(
         elif action.action_type == "PARTNERSHIP" and action.action_target:
             partnership_proposals[name] = action.action_target
 
+        elif action.action_type == "PROPOSE_MERGER" and action.action_target:
+            t = action.action_target
+            if t in companies and companies[t].alive and t != name:
+                merger_proposals[name] = t
+
     # --- Resolve partnerships (mutual proposals auto-accept; NPC 50% accept) ---
     processed = set()
     for proposer, target_name in partnership_proposals.items():
@@ -167,6 +173,39 @@ def resolve_turn(
             processed.add(proposer)
             processed.add(target_name)
 
+    # --- Resolve merger proposals ---
+    # Mutual: target absorbed (gains assets, target dies).
+    # One-sided: heavy reputation loss for proposer, small boost for target.
+    processed_mergers: set = set()
+    for proposer, target_name in merger_proposals.items():
+        if proposer in processed_mergers or target_name in processed_mergers:
+            continue
+        target = companies.get(target_name)
+        if not target or not target.alive:
+            continue
+
+        mutual = merger_proposals.get(target_name) == proposer
+        if mutual:
+            proposer_co = companies[proposer]
+            proposer_co.cash += target.cash
+            proposer_co.market_share += target.market_share
+            target.market_share = 0.0
+            target.alive = False
+            target.cash = 0.0
+            rewards[proposer] += 1.0
+            rewards[target_name] -= 0.5
+            processed_mergers.add(proposer)
+            processed_mergers.add(target_name)
+        else:
+            # Hostile / one-sided attempt
+            companies[proposer].reputation = max(0.0, companies[proposer].reputation - 0.25)
+            rewards[proposer] -= 0.5
+            companies[proposer].market_share = max(0.0, companies[proposer].market_share - 1.0)
+            target.market_share += 1.0
+            target.reputation = min(1.0, target.reputation + 0.05)
+            rewards[target_name] += 0.15
+            processed_mergers.add(target_name)
+
     # --- Tick down partnerships ---
     for company in companies.values():
         expired = [p for p, t in company.partnership_turns_remaining.items() if t <= 1]
@@ -177,10 +216,14 @@ def resolve_turn(
         for partner in company.partnership_turns_remaining:
             company.partnership_turns_remaining[partner] -= 1
 
-    # Active partnership bonus
+    # Active partnership bonus — only count alive partners
     for name, company in companies.items():
-        if company.active_partnerships:
-            rewards[name] += 0.1 * len(company.active_partnerships)
+        alive_partners = [p for p in company.active_partnerships
+                          if companies.get(p) and companies[p].alive]
+        if alive_partners:
+            trait = SECTOR_TRAITS.get(company.sector)
+            bonus_mult = trait.partnership_bonus_multiplier if trait else 1.0
+            rewards[name] += 0.1 * bonus_mult * len(alive_partners)
 
     # --- Phase 3: Economy update ---
     for name, company in companies.items():
@@ -196,7 +239,7 @@ def resolve_turn(
             company.cash += company.cash * (trait.cash_interest_multiplier - 1.0)
 
         # Market share → revenue
-        company.cash += company.cash * 0.005 * (company.market_share / 25.0)
+        company.cash += company.cash * 0.005 * (company.market_share / MARKET_SHARE_BASELINE)
 
         # Update stock price
         company.stock_price = _update_stock(company, press_wire, rng)
@@ -224,8 +267,8 @@ def _update_stock(company: CompanyState, press_wire: List[Dict], rng: random.Ran
     cash_health = min(company.cash / company.starting_cash, 2.0)
     base *= 0.95 + 0.1 * cash_health
 
-    # Market share momentum (25% baseline for 4-player)
-    base *= 0.98 + 0.04 * (company.market_share / 25.0)
+    # Market share momentum (baseline = 100% / num_companies)
+    base *= 0.98 + 0.04 * (company.market_share / MARKET_SHARE_BASELINE)
 
     # Press release effects on this company
     for press in press_wire:

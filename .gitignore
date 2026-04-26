@@ -6,3 +6,9 @@ replays/
 checkpoints/
 wandb/
 *.egg-info/
+
+__pycache__/
+
+*.pyc
+
+.claude/
