@@ -21,7 +21,7 @@ except Exception as e:
 try:
     from ..models import BoardroomAction, BoardroomObservation
     from .boardroom_environment import BoardroomEnvironment
-except ModuleNotFoundError:
+except ImportError:
     from models import BoardroomAction, BoardroomObservation
     from server.boardroom_environment import BoardroomEnvironment
 

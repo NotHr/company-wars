@@ -68,6 +68,8 @@ class BoardroomEnvironment(Environment):
         return self._make_observation(done=False, reward=0.0)
 
     def step(self, action: BoardroomAction) -> BoardroomObservation:
+        if not self._companies:
+            self.reset()
         self._state.step_count += 1
 
         primary_action = self._parse_primary_action(action)

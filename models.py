@@ -1,9 +1,10 @@
 """Data models for BOARDROOM — multi-agent corporate warfare environment."""
 
+import json
 from typing import Any, Dict, List, Literal, Optional
 
 from openenv.core.env_server.types import Action, Observation
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class Email(BaseModel):
@@ -32,7 +33,19 @@ class BoardroomAction(Action):
     private_emails: List[Email] = Field(default_factory=list)
     press_release: Optional[PressRelease] = None
     action_type: Literal["EARNINGS_CALL", "SABOTAGE", "PARTNERSHIP", "PROPOSE_MERGER", "HOLD"] = "HOLD"
-    action_target: Optional[str] = None  # target company name for SABOTAGE/PARTNERSHIP/PROPOSE_MERGER
+    action_target: Optional[str] = None
+
+    @field_validator("private_emails", mode="before")
+    @classmethod
+    def coerce_emails(cls, v):
+        if isinstance(v, str):
+            try:
+                v = json.loads(v)
+            except Exception:
+                return []
+        if not isinstance(v, list):
+            return []
+        return v
 
 
 class BoardroomObservation(Observation):

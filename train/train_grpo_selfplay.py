@@ -15,13 +15,18 @@
 # ]
 # ///
 """
-BOARDROOM — GRPO Training Script (fully self-contained for HF Jobs)
+BOARDROOM — Self-Play GRPO Training Script
 
-HF Jobs A10G (recommended):
-    hf jobs uv run --flavor a10g-small train/train_grpo.py --model-id google/gemma-4-E2B-it
+All 7 companies use the same model. Primary company rotates randomly each
+episode so the model learns a general strategy, not just one company's role.
+GRPO loss is computed only on the primary company's completion; the other 6
+completions are inference-only (no grad).
 
-HF Jobs T4:
-    hf jobs uv run --flavor t4-medium train/train_grpo.py --model-id google/gemma-4-E2B-it --fp16
+HF Jobs L40S:
+    hf jobs uv run --flavor l40sx1 \\
+      --env WANDB_API_KEY=... --env HF_TOKEN=... \\
+      train/train_grpo_selfplay.py \\
+      --hub-model-id nothr/boardroom-grpo-selfplay
 """
 
 import argparse
@@ -35,15 +40,15 @@ from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 from uuid import uuid4
 
-# ------------------------------------------------------------------ #
-# Inlined models.py                                                    #
-# ------------------------------------------------------------------ #
 from openenv.core.env_server.types import Action, Observation
 from openenv.core.env_server.interfaces import Environment
 from openenv.core.env_server.types import State
 from pydantic import BaseModel, Field as PydanticField, field_validator
 
 
+# ------------------------------------------------------------------ #
+# Models (identical to train_grpo.py)                                  #
+# ------------------------------------------------------------------ #
 class Email(BaseModel):
     to: str
     text: str = PydanticField(max_length=500)
@@ -99,7 +104,7 @@ class BoardroomObservation(Observation):
 
 
 # ------------------------------------------------------------------ #
-# Inlined server/companies.py                                          #
+# Companies + sector traits (identical to train_grpo.py)              #
 # ------------------------------------------------------------------ #
 @dataclass
 class SectorTrait:
@@ -130,8 +135,9 @@ L2_COMPANIES: List[Dict] = [
     {"name": "Solstice Energy",      "sector": "Energy"},
     {"name": "Medvault Health",      "sector": "Healthcare"},
 ]
+ALL_COMPANY_NAMES = [c["name"] for c in L2_COMPANIES]
 
-MARKET_SHARE_BASELINE: float = 100.0 / len(L2_COMPANIES)  # ≈14.2857
+MARKET_SHARE_BASELINE: float = 100.0 / len(L2_COMPANIES)
 
 STARTING_STATS = {
     "cash": 50_000_000.0,
@@ -142,7 +148,7 @@ STARTING_STATS = {
 
 
 # ------------------------------------------------------------------ #
-# Inlined server/game_logic.py                                         #
+# Game logic (identical to train_grpo.py)                             #
 # ------------------------------------------------------------------ #
 @dataclass
 class CompanyState:
@@ -179,11 +185,7 @@ class TurnResult:
     emails: Dict[str, List[Dict]]
 
 
-def resolve_turn(
-    companies: Dict[str, CompanyState],
-    actions: Dict[str, TurnAction],
-    rng: random.Random,
-) -> TurnResult:
+def resolve_turn(companies, actions, rng):
     rewards = {name: 0.0 for name in companies}
     press_wire: List[Dict] = []
     emails: Dict[str, List[Dict]] = {name: [] for name in companies}
@@ -339,7 +341,7 @@ def resolve_turn(
     return TurnResult(rewards=rewards, press_wire=press_wire, emails=emails)
 
 
-def _update_stock(company: CompanyState, press_wire: List[Dict], rng: random.Random) -> float:
+def _update_stock(company, press_wire, rng):
     base = company.stock_price
     cash_health = min(company.cash / company.starting_cash, 2.0)
     base *= 0.95 + 0.1 * cash_health
@@ -359,7 +361,7 @@ def _update_stock(company: CompanyState, press_wire: List[Dict], rng: random.Ran
     return max(1.0, base)
 
 
-def _redistribute_market_share(bankrupt: CompanyState, companies: Dict[str, CompanyState]) -> None:
+def _redistribute_market_share(bankrupt, companies):
     alive = [c for c in companies.values() if c.alive and c.name != bankrupt.name]
     if not alive:
         return
@@ -369,10 +371,7 @@ def _redistribute_market_share(bankrupt: CompanyState, companies: Dict[str, Comp
     bankrupt.market_share = 0.0
 
 
-# ------------------------------------------------------------------ #
-# Inlined server/reward.py                                             #
-# ------------------------------------------------------------------ #
-def compute_terminal_reward(companies: Dict[str, CompanyState], ceo_id: str) -> float:
+def compute_terminal_reward(companies, ceo_id):
     company = companies.get(ceo_id)
     if not company:
         return 0.0
@@ -388,113 +387,48 @@ def compute_terminal_reward(companies: Dict[str, CompanyState], ceo_id: str) -> 
 
 
 # ------------------------------------------------------------------ #
-# Inlined server/boardroom_environment.py                              #
+# Self-play environment — key difference from base env                #
 # ------------------------------------------------------------------ #
-class BoardroomEnvironment(Environment):
-    SUPPORTS_CONCURRENT_SESSIONS: bool = True
+class SelfPlayBoardroomEnvironment:
+    """
+    Thin game-state holder for one turn of self-play.
+    All 7 companies are played by the model; this class just holds state
+    and exposes per-company prompts + a multi-action step.
+    """
     MAX_TURNS: int = 12
-    PRIMARY_CEO: str = "Vermillion Capital"
 
     def __init__(self):
-        self._state = State(episode_id=str(uuid4()), step_count=0)
         self._companies: Dict[str, CompanyState] = {}
         self._turn: int = 0
         self._rng = random.Random()
-        self._replay_log: List[Dict] = []
-        self._last_turn_result: Optional[TurnResult] = None
+        self._last_result: Optional[TurnResult] = None
+        self.primary_ceo: str = ALL_COMPANY_NAMES[0]
 
-    def reset(self) -> BoardroomObservation:
-        self._state = State(episode_id=str(uuid4()), step_count=0)
-        self._turn = 0
-        self._replay_log = []
-        self._last_turn_result = None
+    def reset(self, primary_ceo: Optional[str] = None) -> None:
         self._rng = random.Random(random.randint(0, 2**32))
-        self._companies = {}
-        for defn in L2_COMPANIES:
-            self._companies[defn["name"]] = CompanyState(
-                name=defn["name"],
-                sector=defn["sector"],
-                cash=STARTING_STATS["cash"],
-                market_share=STARTING_STATS["market_share"],
-                stock_price=STARTING_STATS["stock_price"],
-                reputation=STARTING_STATS["reputation"],
+        self._turn = 0
+        self._last_result = None
+        self.primary_ceo = primary_ceo or random.choice(ALL_COMPANY_NAMES)
+        self._companies = {
+            defn["name"]: CompanyState(
+                name=defn["name"], sector=defn["sector"],
+                cash=STARTING_STATS["cash"], market_share=STARTING_STATS["market_share"],
+                stock_price=STARTING_STATS["stock_price"], reputation=STARTING_STATS["reputation"],
                 starting_cash=STARTING_STATS["cash"],
             )
-        return self._make_observation(done=False, reward=0.0)
+            for defn in L2_COMPANIES
+        }
 
-    def step(self, action: BoardroomAction) -> BoardroomObservation:
-        self._state.step_count += 1
-        primary_action = self._parse_primary_action(action)
-        all_actions: Dict[str, TurnAction] = {self.PRIMARY_CEO: primary_action}
-        for name, company in self._companies.items():
-            if name != self.PRIMARY_CEO and company.alive:
-                all_actions[name] = self._heuristic_action(name)
-        result = resolve_turn(self._companies, all_actions, self._rng)
-        self._last_turn_result = result
-        self._turn += 1
-        my_reward = result.rewards.get(self.PRIMARY_CEO, 0.0)
-        alive = [c for c in self._companies.values() if c.alive]
-        primary_alive = self._companies[self.PRIMARY_CEO].alive
-        done = self._turn >= self.MAX_TURNS or len(alive) <= 1 or not primary_alive
-        if done:
-            my_reward += compute_terminal_reward(self._companies, self.PRIMARY_CEO)
-        return self._make_observation(done=done, reward=my_reward)
+    def get_company_prompt(self, company_name: str) -> str:
+        """Return the text observation for any company (used to build model inputs)."""
+        primary = self._companies.get(company_name)
+        if not primary or not primary.alive:
+            return "Game over."
 
-    @property
-    def state(self) -> State:
-        return self._state
-
-    def _parse_primary_action(self, action: BoardroomAction) -> TurnAction:
-        atype = action.action_type
-        target = action.action_target
-        parse_failed = False
-        if target:
-            if target not in self._companies or not self._companies[target].alive or target == self.PRIMARY_CEO:
-                target = None
-                parse_failed = True
-        if atype in ("SABOTAGE", "PARTNERSHIP", "PROPOSE_MERGER") and not target:
-            atype = "HOLD"
-            parse_failed = True
-        return TurnAction(
-            company_name=self.PRIMARY_CEO,
-            private_emails=[e.model_dump() for e in action.private_emails[:2]],
-            press_release=action.press_release.model_dump() if action.press_release else None,
-            action_type=atype,
-            action_target=target,
-            parse_failed=parse_failed,
-        )
-
-    def _heuristic_action(self, name: str) -> TurnAction:
-        alive_others = [n for n, c in self._companies.items() if c.alive and n != name]
-        r = self._rng.random()
-        if r < 0.15:
-            atype, target = "EARNINGS_CALL", None
-        elif r < 0.35 and alive_others:
-            atype, target = "SABOTAGE", self._rng.choice(alive_others)
-        elif r < 0.45 and alive_others:
-            atype, target = "PARTNERSHIP", self._rng.choice(alive_others)
-        elif r < 0.52 and alive_others:
-            atype, target = "PROPOSE_MERGER", self._rng.choice(alive_others)
-        else:
-            atype, target = "HOLD", None
-        press = None
-        if self._rng.random() < 0.20 and alive_others:
-            mention = self._rng.choice(alive_others)
-            press = {"claim": f"{mention} is underperforming this quarter.", "marked_truthful": True}
-        return TurnAction(company_name=name, private_emails=[], press_release=press,
-                          action_type=atype, action_target=target)
-
-    def _make_observation(self, done: bool, reward: float) -> BoardroomObservation:
-        primary = self._companies.get(self.PRIMARY_CEO)
-        your_stats = CompanyStats(
-            name=primary.name, sector=primary.sector, cash=primary.cash,
-            market_share=primary.market_share, stock_price=primary.stock_price,
-            reputation=primary.reputation, alive=primary.alive,
-        ) if primary else None
-        all_companies = [
+        all_companies_stats = [
             CompanyStats(
                 name=c.name, sector=c.sector,
-                cash=-1.0 if n != self.PRIMARY_CEO else c.cash,
+                cash=c.cash if n == company_name else -1.0,
                 market_share=c.market_share, stock_price=c.stock_price,
                 reputation=c.reputation, alive=c.alive,
             )
@@ -505,36 +439,75 @@ class BoardroomEnvironment(Environment):
              for c in self._companies.values()],
             key=lambda x: x["market_cap"], reverse=True,
         )
-        emails_received: List[Email] = []
-        if self._last_turn_result:
-            for mail in self._last_turn_result.emails.get(self.PRIMARY_CEO, []):
-                emails_received.append(Email(to=self.PRIMARY_CEO, text=f"From {mail['from']}: {mail['text']}"))
-        press_wire = self._last_turn_result.press_wire if self._last_turn_result else []
-        active_partnerships = primary.active_partnerships if primary else []
-        prompt = _build_prompt(
-            primary=primary, all_companies=all_companies, leaderboard=leaderboard,
-            active_partnerships=active_partnerships, emails_received=emails_received,
-            press_wire=press_wire, turn=self._turn, max_turns=self.MAX_TURNS,
+        emails_received = []
+        if self._last_result:
+            for mail in self._last_result.emails.get(company_name, []):
+                emails_received.append(Email(to=company_name, text=f"From {mail['from']}: {mail['text']}"))
+        press_wire = self._last_result.press_wire if self._last_result else []
+
+        return _build_prompt(
+            primary=primary, all_companies=all_companies_stats,
+            leaderboard=leaderboard, active_partnerships=primary.active_partnerships,
+            emails_received=emails_received, press_wire=press_wire,
+            turn=self._turn, max_turns=self.MAX_TURNS,
         )
-        return BoardroomObservation(
-            you_are=self.PRIMARY_CEO, turn=self._turn, max_turns=self.MAX_TURNS,
-            your_stats=your_stats, all_companies=all_companies, emails_received=emails_received,
-            press_wire=press_wire, active_partnerships=active_partnerships,
-            pending_partnership_proposals=[], leaderboard=leaderboard,
-            game_log=[], prompt=prompt, done=done, reward=reward,
+
+    def step_all_companies(self, actions: Dict[str, TurnAction]) -> Dict[str, float]:
+        """Resolve one turn with all 7 companies' actions. Returns per-company rewards."""
+        result = resolve_turn(self._companies, actions, self._rng)
+        self._last_result = result
+        self._turn += 1
+
+        alive = [c for c in self._companies.values() if c.alive]
+        done = self._turn >= self.MAX_TURNS or len(alive) <= 1
+
+        rewards = dict(result.rewards)
+        if done:
+            for name in self._companies:
+                rewards[name] = rewards.get(name, 0.0) + compute_terminal_reward(self._companies, name)
+
+        return rewards
+
+    def parse_action_for(self, action_dict: Dict[str, Any], company_name: str) -> TurnAction:
+        """Validate and convert an action dict for a specific company."""
+        atype = str(action_dict.get("action_type", "HOLD")).upper()
+        target = action_dict.get("action_target")
+        parse_failed = False
+
+        if atype not in ("EARNINGS_CALL", "SABOTAGE", "PARTNERSHIP", "PROPOSE_MERGER", "HOLD"):
+            atype = "HOLD"
+            parse_failed = True
+
+        if target:
+            if target not in self._companies or not self._companies[target].alive or target == company_name:
+                target = None
+                parse_failed = True
+
+        if atype in ("SABOTAGE", "PARTNERSHIP", "PROPOSE_MERGER") and not target:
+            atype = "HOLD"
+            parse_failed = True
+
+        emails = []
+        for e in (action_dict.get("private_emails") or [])[:2]:
+            if isinstance(e, dict) and e.get("to") and e.get("text"):
+                try:
+                    emails.append({"to": str(e["to"]), "text": str(e["text"])[:500]})
+                except Exception:
+                    pass
+
+        press = None
+        pr = action_dict.get("press_release")
+        if isinstance(pr, dict) and pr.get("claim"):
+            press = {"claim": str(pr["claim"])[:500], "marked_truthful": bool(pr.get("marked_truthful", True))}
+
+        return TurnAction(
+            company_name=company_name, private_emails=emails, press_release=press,
+            action_type=atype, action_target=target, parse_failed=parse_failed,
         )
 
 
-def _build_prompt(
-    primary: Optional[CompanyState],
-    all_companies: List,
-    leaderboard: List[Dict],
-    active_partnerships: List[str],
-    emails_received: List,
-    press_wire: List[Dict],
-    turn: int,
-    max_turns: int,
-) -> str:
+def _build_prompt(primary, all_companies, leaderboard, active_partnerships,
+                  emails_received, press_wire, turn, max_turns):
     if not primary:
         return "Game over."
     lines = [
@@ -583,11 +556,10 @@ def _build_prompt(
 
 
 # ------------------------------------------------------------------ #
-# Inlined from action_loop.py                                          #
+# Parse helpers                                                        #
 # ------------------------------------------------------------------ #
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
 _JSON_RE   = re.compile(r"\{.*\}", re.DOTALL)
-_MAX_RETRIES = 3
 
 SYSTEM_PROMPT = """You are CEO of a company in a corporate warfare game.
 Output ONLY valid JSON — no explanation, no markdown, no extra text.
@@ -618,7 +590,7 @@ class ParseResult:
 
 def parse_completion(text: str) -> ParseResult:
     text = _THINK_RE.sub("", text).strip()
-    for _ in range(_MAX_RETRIES):
+    for _ in range(3):
         match = _JSON_RE.search(text)
         if not match:
             break
@@ -642,48 +614,39 @@ def parse_completion(text: str) -> ParseResult:
 # ------------------------------------------------------------------ #
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser()
-    p.add_argument("--model-id",            default="google/gemma-4-E2B-it")
-    p.add_argument("--output-dir",          default="checkpoints/boardroom-grpo")
-    p.add_argument("--run-name",            default="boardroom-grpo-v1")
-    p.add_argument("--max-steps",           type=int, default=1000)
-    p.add_argument("--batch-size",          type=int, default=4)
-    p.add_argument("--num-generations",     type=int, default=4)   # was 8 — halves generation time
-    p.add_argument("--max-completion-len",  type=int, default=160) # was 256 — completions ~127 tok
-    p.add_argument("--warmup-steps",        type=int, default=10)
-    p.add_argument("--refresh-every",       type=int, default=50)
-    p.add_argument("--n-rollout-episodes",  type=int, default=50)
-    p.add_argument("--fp16", action="store_true",
-                   help="Use fp16 instead of bf16 (for T4/Turing GPUs)")
-    p.add_argument("--hub-model-id", default=None,
-                   help="HF Hub repo to push adapter to, e.g. 'username/boardroom-grpo-lora'")
+    p.add_argument("--model-id",           default="google/gemma-4-E2B-it")
+    p.add_argument("--output-dir",         default="checkpoints/boardroom-selfplay")
+    p.add_argument("--run-name",           default="boardroom-selfplay-v1")
+    p.add_argument("--max-steps",          type=int, default=200)
+    p.add_argument("--batch-size",         type=int, default=4)
+    p.add_argument("--num-generations",    type=int, default=4)
+    p.add_argument("--max-completion-len", type=int, default=128)
+    p.add_argument("--warmup-steps",       type=int, default=10)
+    p.add_argument("--refresh-every",      type=int, default=50)
+    p.add_argument("--n-seeds",            type=int, default=50)
+    p.add_argument("--fp16",               action="store_true")
+    p.add_argument("--hub-model-id",       default=None)
     return p.parse_args()
 
 
 # ------------------------------------------------------------------ #
-# Model loading                                                        #
+# Model loading (identical to train_grpo.py)                          #
 # ------------------------------------------------------------------ #
 def load_model(model_id: str, use_fp16: bool = False):
     import torch
-    dtype = torch.float16 if use_fp16 else None  # None = auto (bf16 on Ampere)
+    dtype = torch.float16 if use_fp16 else None
 
     try:
         from unsloth import FastLanguageModel
         model, tokenizer = FastLanguageModel.from_pretrained(
-            model_name     = model_id,
-            max_seq_length = 2048,
-            load_in_4bit   = True,
-            dtype          = dtype,
+            model_name=model_id, max_seq_length=2048, load_in_4bit=True, dtype=dtype,
         )
         model = FastLanguageModel.get_peft_model(
-            model,
-            r                          = 16,
-            target_modules             = ["q_proj","k_proj","v_proj","o_proj",
-                                          "gate_proj","up_proj","down_proj"],
-            lora_alpha                 = 16,
-            lora_dropout               = 0,
-            bias                       = "none",
-            use_gradient_checkpointing = "unsloth",
-            random_state               = 42,
+            model, r=16,
+            target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
+                            "gate_proj", "up_proj", "down_proj"],
+            lora_alpha=16, lora_dropout=0, bias="none",
+            use_gradient_checkpointing="unsloth", random_state=42,
         )
         print(f"[model] Unsloth 4-bit LoRA — {model_id}")
     except ImportError:
@@ -691,8 +654,8 @@ def load_model(model_id: str, use_fp16: bool = False):
         tokenizer = AutoTokenizer.from_pretrained(model_id)
         model = AutoModelForCausalLM.from_pretrained(
             model_id,
-            torch_dtype = torch.float16 if use_fp16 else torch.bfloat16,
-            device_map  = "auto",
+            torch_dtype=torch.float16 if use_fp16 else torch.bfloat16,
+            device_map="auto",
         )
         print(f"[model] vanilla HF — {model_id}")
 
@@ -702,29 +665,68 @@ def load_model(model_id: str, use_fp16: bool = False):
 
 
 # ------------------------------------------------------------------ #
-# Dataset — episode seed prompts (rollout_func does the actual work)  #
+# Dataset — one seed prompt per company per episode                   #
 # ------------------------------------------------------------------ #
 def build_seed_dataset(n_seeds: int):
-    """Tiny dataset of fresh episode prompts. rollout_func regenerates each step."""
+    """
+    Each record is one company's initial game prompt.
+    n_seeds episodes × 7 companies = 7*n_seeds records total.
+    The model learns to play any company, not just Vermillion.
+    """
     from datasets import Dataset
     records = []
     for _ in range(n_seeds):
-        env = BoardroomEnvironment()
-        obs = env.reset()
-        records.append({"prompt": obs.prompt})
+        env = SelfPlayBoardroomEnvironment()
+        env.reset()
+        for company_name in ALL_COMPANY_NAMES:
+            records.append({
+                "prompt":  env.get_company_prompt(company_name),
+                "company": company_name,
+            })
     return Dataset.from_list(records)
 
 
 # ------------------------------------------------------------------ #
-# rollout_func — generate completions + step env, pass rewards        #
+# Self-play rollout_func                                               #
 # ------------------------------------------------------------------ #
-def make_rollout_func(tokenizer, use_fp16: bool):
+def make_selfplay_rollout_func(tokenizer, use_fp16: bool):
     import torch
     import torch.nn.functional as F
+
+    def _generate_one(model, tokenizer, prompt_text: str, device, max_new: int):
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user",   "content": prompt_text},
+        ]
+        chat = tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
+        enc = tokenizer(text=chat, return_tensors="pt")
+        input_ids     = enc.input_ids.to(device)
+        attention_mask = torch.ones_like(input_ids)
+
+        with torch.no_grad():
+            out = model.generate(
+                input_ids,
+                attention_mask          = attention_mask,
+                max_new_tokens          = max_new,
+                do_sample               = True,
+                temperature             = 0.8,
+                pad_token_id            = tokenizer.eos_token_id,
+                return_dict_in_generate = True,
+                output_scores           = True,
+            )
+
+        comp_ids    = out.sequences[0][input_ids.shape[1]:]
+        comp_text   = tokenizer.decode(comp_ids, skip_special_tokens=True)
+        logprobs    = [
+            F.log_softmax(score[0], dim=-1)[comp_ids[i]].item()
+            for i, score in enumerate(out.scores) if i < len(comp_ids)
+        ]
+        return input_ids[0].tolist(), comp_ids.tolist(), logprobs, comp_text
 
     def rollout_func(prompts: List[str], trainer) -> Dict[str, List]:
         model  = trainer.model
         device = next(model.parameters()).device
+        max_new = 128
 
         all_prompt_ids:     List[List[int]]   = []
         all_completion_ids: List[List[int]]   = []
@@ -733,57 +735,41 @@ def make_rollout_func(tokenizer, use_fp16: bool):
         all_parse_ok:       List[float]       = []
 
         for prompt_text in prompts:
-            # ── Tokenise ───────────────────────────────────────────────
-            messages = [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user",   "content": prompt_text},
-            ]
-            chat = tokenizer.apply_chat_template(
-                messages, add_generation_prompt=True, tokenize=False
+            # Identify which company this prompt is for
+            m = re.search(r"You are CEO of: (.+?) \(", prompt_text)
+            primary = m.group(1) if m else ALL_COMPANY_NAMES[0]
+
+            # Fresh game state
+            env = SelfPlayBoardroomEnvironment()
+            env.reset(primary_ceo=primary)
+
+            # Generate action for PRIMARY company (kept for GRPO)
+            p_input_ids, p_comp_ids, p_logprobs, p_text = _generate_one(
+                model, tokenizer, prompt_text, device, max_new
             )
-            enc = tokenizer(text=chat, return_tensors="pt")
-            input_ids = enc.input_ids.to(device)
+            primary_result = parse_completion(p_text)
 
-            # ── Generate ───────────────────────────────────────────────
-            with torch.no_grad():
-                out = model.generate(
-                    input_ids,
-                    max_new_tokens  = 160,
-                    do_sample       = True,
-                    temperature     = 0.7,
-                    pad_token_id    = tokenizer.eos_token_id,
-                    return_dict_in_generate = True,
-                    output_scores           = True,
-                )
+            # Generate actions for all OTHER companies (inference only, no grad needed)
+            all_turn_actions: Dict[str, TurnAction] = {}
+            for company in ALL_COMPANY_NAMES:
+                if company == primary:
+                    all_turn_actions[company] = env.parse_action_for(primary_result.action_dict, company)
+                else:
+                    _, _, _, opp_text = _generate_one(
+                        model, tokenizer, env.get_company_prompt(company), device, max_new
+                    )
+                    opp_result = parse_completion(opp_text)
+                    all_turn_actions[company] = env.parse_action_for(opp_result.action_dict, company)
 
-            completion_ids = out.sequences[0][input_ids.shape[1]:]
-            completion_text = tokenizer.decode(completion_ids, skip_special_tokens=True)
+            # Resolve turn, get primary company's reward
+            rewards = env.step_all_companies(all_turn_actions)
+            env_reward = float(rewards.get(primary, 0.0)) * 0.5
 
-            # ── Log-probs from generation scores ───────────────────────
-            logprobs: List[float] = []
-            for i, score in enumerate(out.scores):
-                if i < len(completion_ids):
-                    lp = F.log_softmax(score[0], dim=-1)
-                    logprobs.append(lp[completion_ids[i]].item())
-
-            # ── Parse + env step ───────────────────────────────────────
-            result = parse_completion(completion_text)
-            env_reward = 0.0
-            if result.parse_ok:
-                try:
-                    env = BoardroomEnvironment()
-                    env.reset()
-                    action = _get_action_from_dict(result.action_dict)
-                    obs = env.step(action)
-                    env_reward = float(obs.reward) * 0.5
-                except Exception:
-                    pass
-
-            all_prompt_ids.append(input_ids[0].tolist())
-            all_completion_ids.append(completion_ids.tolist())
-            all_logprobs.append(logprobs)
+            all_prompt_ids.append(p_input_ids)
+            all_completion_ids.append(p_comp_ids)
+            all_logprobs.append(p_logprobs)
             all_env_rewards.append(env_reward)
-            all_parse_ok.append(1.0 if result.parse_ok else 0.0)
+            all_parse_ok.append(1.0 if primary_result.parse_ok else 0.0)
 
         return {
             "prompt_ids":     all_prompt_ids,
@@ -797,121 +783,41 @@ def make_rollout_func(tokenizer, use_fp16: bool):
 
 
 # ------------------------------------------------------------------ #
-# Reward function                                                      #
+# Reward function (extracts from rollout kwargs)                       #
 # ------------------------------------------------------------------ #
-COMPANIES = {c["name"] for c in L2_COMPANIES}
-
-# Per-prompt env cache so each GRPO batch reuses the same game state
-# key: prompt text → BoardroomObservation (holds the live env + obs)
-_ENV_CACHE: Dict[str, Any] = {}
-_ENV_LOCK_IMPORT = False
-
-
-def _get_action_from_dict(d: Dict[str, Any]) -> BoardroomAction:
-    emails = []
-    for e in (d.get("private_emails") or [])[:2]:
-        if isinstance(e, dict) and e.get("to") and e.get("text"):
-            try:
-                emails.append(Email(to=str(e["to"]), text=str(e["text"])[:500]))
-            except Exception:
-                pass
-    press = None
-    pr = d.get("press_release")
-    if isinstance(pr, dict) and pr.get("claim"):
-        try:
-            press = PressRelease(claim=str(pr["claim"])[:500],
-                                 marked_truthful=bool(pr.get("marked_truthful", True)))
-        except Exception:
-            pass
-    return BoardroomAction(
-        private_emails=emails,
-        press_release=press,
-        action_type=d.get("action_type", "HOLD"),
-        action_target=d.get("action_target"),
-    )
-
-
 def reward_fn(prompts, completions, **kwargs) -> List[float]:
-    # When rollout_func is used, env_reward + parse_ok are pre-computed per sample
-    pre_env_rewards  = kwargs.get("env_reward", [])
-    pre_parse_ok     = kwargs.get("parse_ok",   [])
-    using_rollout    = len(pre_env_rewards) == len(completions)
+    pre_env_rewards = kwargs.get("env_reward", [])
+    pre_parse_ok    = kwargs.get("parse_ok",   [])
+    using_rollout   = len(pre_env_rewards) == len(completions)
 
     rewards = []
-    for i, (prompt, completion) in enumerate(zip(prompts, completions)):
-        # Use pre-computed values from rollout_func if available
+    for i, completion in enumerate(completions):
         if using_rollout:
-            if pre_parse_ok[i] < 0.5:
-                rewards.append(-1.0)
-            else:
-                rewards.append(float(pre_env_rewards[i]))
-            continue
-
-        # Fallback: compute locally (classic GRPOTrainer without rollout_func)
-        if isinstance(completion, list):
-            completion = completion[-1].get("content", "") if completion else ""
-        elif isinstance(completion, dict):
-            completion = completion.get("content", "")
-        completion = str(completion)
-
-        result = parse_completion(completion)
-        if not result.parse_ok:
-            rewards.append(-1.0)
-            continue
-
-        d      = result.action_dict
-        atype  = d.get("action_type", "HOLD")
-        target = d.get("action_target")
-
-        fmt = 0.0
-        emails_ok = [
-            e for e in (d.get("private_emails") or [])
-            if isinstance(e, dict)
-            and e.get("to") in COMPANIES
-            and str(e.get("text", "")).strip()
-        ]
-        fmt += 0.05 * min(len(emails_ok), 2)
-        pr = d.get("press_release")
-        if isinstance(pr, dict) and str(pr.get("claim", "")).strip():
-            fmt += 0.05
-
-        env_reward = 0.0
-        try:
-            env = BoardroomEnvironment()
-            env.reset()
-            action = _get_action_from_dict(d)
-            obs = env.step(action)
-            env_reward = float(obs.reward) * 0.5
-        except Exception:
-            pass
-
-        strat = 0.0
-        if atype in ("SABOTAGE", "PARTNERSHIP", "PROPOSE_MERGER"):
-            if target in COMPANIES and target != "Vermillion Capital":
-                strat += 0.1
-            else:
-                strat -= 0.2
-
-        rewards.append(round(fmt + env_reward + strat, 4))
+            rewards.append(-1.0 if pre_parse_ok[i] < 0.5 else float(pre_env_rewards[i]))
+        else:
+            if isinstance(completion, list):
+                completion = completion[-1].get("content", "") if completion else ""
+            elif isinstance(completion, dict):
+                completion = completion.get("content", "")
+            result = parse_completion(str(completion))
+            rewards.append(-1.0 if not result.parse_ok else 0.0)
     return rewards
 
 
 # ------------------------------------------------------------------ #
 # W&B                                                                  #
 # ------------------------------------------------------------------ #
-def _init_wandb(args: argparse.Namespace) -> None:
+def _init_wandb(args):
     try:
         import wandb
         wandb.init(
-            project = os.environ.get("WANDB_PROJECT", "boardroom"),
-            name    = args.run_name,
-            config  = {
-                "model_id":        args.model_id,
-                "max_steps":       args.max_steps,
-                "batch_size":      args.batch_size,
-                "num_generations": args.num_generations,
-                "algorithm":       "GRPO",
-                "env":             "boardroom-l1",
+            project=os.environ.get("WANDB_PROJECT", "boardroom"),
+            name=args.run_name,
+            config={
+                "model_id": args.model_id, "max_steps": args.max_steps,
+                "batch_size": args.batch_size, "num_generations": args.num_generations,
+                "algorithm": "GRPO", "env": "boardroom-l2-selfplay",
+                "mode": "self_play_7company",
             },
         )
         print(f"[wandb] {wandb.run.url}")
@@ -919,55 +825,15 @@ def _init_wandb(args: argparse.Namespace) -> None:
         print(f"[wandb] skipped — {e}")
 
 
-def _wandb_finish(out: Path, summary: dict) -> None:
+def _wandb_finish(out, summary):
     try:
         import wandb
         if not wandb.run:
             return
         wandb.summary.update(summary)
-        art = wandb.Artifact("training-results", type="results")
-        for f in ["loss.png", "reward.png", "summary.json"]:
-            if (out / f).exists():
-                art.add_file(str(out / f))
-                if f.endswith(".png"):
-                    wandb.log({f.replace(".png", ""): wandb.Image(str(out / f))})
-        wandb.log_artifact(art)
-        adapter = out / "lora_adapter"
-        if adapter.exists():
-            m = wandb.Artifact("lora-adapter", type="model")
-            m.add_dir(str(adapter))
-            wandb.log_artifact(m)
-        run_url = wandb.run.url
         wandb.finish()
-        print(f"[wandb] done — {run_url}")
-    except Exception as e:
-        print(f"[wandb] finish error — {e}")
-
-
-# ------------------------------------------------------------------ #
-# Plots                                                                #
-# ------------------------------------------------------------------ #
-def _save_plots(history: list, out: Path) -> None:
-    try:
-        import matplotlib; matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-        steps   = [h["step"]   for h in history if "step"   in h]
-        losses  = [h["loss"]   for h in history if "loss"   in h]
-        rewards = [h["reward"] for h in history if "reward" in h]
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
-        fig.suptitle("BOARDROOM GRPO", fontsize=13)
-        if losses:
-            ax1.plot(steps[:len(losses)], losses, color="#e05c5c")
-            ax1.set_title("Loss"); ax1.set_xlabel("Step"); ax1.grid(alpha=0.3)
-        if rewards:
-            ax2.plot(steps[:len(rewards)], rewards, color="#5ca8e0")
-            ax2.set_title("Reward"); ax2.set_xlabel("Step"); ax2.grid(alpha=0.3)
-        plt.tight_layout()
-        for name in ["loss.png", "reward.png"]:
-            plt.savefig(out / name, dpi=150, bbox_inches="tight")
-        print(f"[plots] saved → {out}/")
-    except ImportError:
-        print("[plots] matplotlib not installed — skipping")
+    except Exception:
+        pass
 
 
 # ------------------------------------------------------------------ #
@@ -979,13 +845,14 @@ def main():
 
     print(f"[config] model={args.model_id}  steps={args.max_steps}  "
           f"batch={args.batch_size}  gens={args.num_generations}  "
-          f"fp16={args.fp16}")
+          f"mode=SELF-PLAY (7 companies, rotating primary)")
 
     model, tokenizer = load_model(args.model_id, use_fp16=args.fp16)
 
-    print("[dataset] building seed dataset ...")
-    dataset = build_seed_dataset(args.n_rollout_episodes)
-    rollout_func = make_rollout_func(tokenizer, args.fp16)
+    print("[dataset] building self-play seed dataset ...")
+    dataset      = build_seed_dataset(args.n_seeds)
+    rollout_func = make_selfplay_rollout_func(tokenizer, args.fp16)
+    print(f"[dataset] {len(dataset)} records ({args.n_seeds} episodes × 7 companies)")
 
     from trl import GRPOConfig, GRPOTrainer
 
@@ -1010,20 +877,16 @@ def main():
     )
 
     trainer_kwargs: Dict[str, Any] = dict(
-        model            = model,
-        processing_class = tokenizer,
-        args             = config,
-        reward_funcs     = reward_fn,
-        train_dataset    = dataset,
+        model=model, processing_class=tokenizer,
+        args=config, reward_funcs=reward_fn, train_dataset=dataset,
     )
-    # Wire rollout_func if GRPOTrainer supports it (TRL >= 0.27.0 experimental)
     try:
         import inspect
         if "rollout_func" in inspect.signature(GRPOTrainer.__init__).parameters:
             trainer_kwargs["rollout_func"] = rollout_func
-            print("[rollout] using custom rollout_func (TRL OpenEnv)")
+            print("[rollout] custom self-play rollout_func wired")
         else:
-            print("[rollout] GRPOTrainer has no rollout_func param — using reward_fn fallback")
+            print("[rollout] GRPOTrainer has no rollout_func param — reward_fn fallback")
     except Exception:
         pass
 
@@ -1048,12 +911,10 @@ def main():
         loss = original_step(*a, **kw)
         step_counter[0] += 1
 
-        # Dataset refresh
         if step_counter[0] % (args.refresh_every * 2) == 0:
-            print(f"\n[refresh] step {step_counter[0]} — re-rolling dataset ...")
-            trainer.train_dataset = build_seed_dataset(args.n_rollout_episodes // 2)
+            print(f"\n[refresh] step {step_counter[0]} — re-rolling self-play dataset ...")
+            trainer.train_dataset = build_seed_dataset(args.n_seeds // 2)
 
-        # Save + push best model whenever reward improves
         log = trainer.state.log_history
         recent_rewards = [e["reward"] for e in log if "reward" in e]
         if recent_rewards:
@@ -1062,36 +923,32 @@ def main():
                 best_reward[0] = latest_reward
                 model.save_pretrained(best_dir)
                 tokenizer.save_pretrained(best_dir)
-                print(f"\n[best] step {step_counter[0]} reward={latest_reward:.4f} → saved locally")
+                print(f"\n[best] step {step_counter[0]} reward={latest_reward:.4f} → saved")
                 if _hf_api and args.hub_model_id:
                     try:
                         _hf_api.upload_folder(
-                            folder_path=str(best_dir),
-                            repo_id=args.hub_model_id,
+                            folder_path=str(best_dir), repo_id=args.hub_model_id,
                             repo_type="model",
                             commit_message=f"best adapter step={step_counter[0]} reward={latest_reward:.4f}",
                         )
                         print(f"[hub] pushed → https://huggingface.co/{args.hub_model_id}")
                     except Exception as e:
-                        print(f"[hub] upload failed (non-fatal): {e}")
-
+                        print(f"[hub] upload failed: {e}")
         return loss
 
     trainer.training_step = patched_step
 
-    print(f"[train] starting {args.max_steps} steps ...")
+    print(f"[train] starting {args.max_steps} steps (self-play) ...")
     trainer.train()
-
-    print(f"[done] best reward={best_reward[0]:.4f} → {best_dir}")
-
-    _save_plots(trainer.state.log_history, out)
 
     history = trainer.state.log_history
     summary = {
         "steps":        args.max_steps,
         "model_id":     args.model_id,
+        "mode":         "self_play",
         "final_loss":   next((h["loss"]   for h in reversed(history) if "loss"   in h), None),
         "final_reward": next((h["reward"] for h in reversed(history) if "reward" in h), None),
+        "best_reward":  best_reward[0],
     }
     (out / "summary.json").write_text(json.dumps(summary, indent=2))
     print(json.dumps(summary, indent=2))
