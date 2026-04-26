@@ -27,10 +27,14 @@ class CompanyState:
     active_partnerships: List[str] = field(default_factory=list)
     partnership_turns_remaining: Dict[str, int] = field(default_factory=dict)
 
+    # Spy state: companies this company has active spies on (cleared after interception each turn)
+    has_spy_on: List[str] = field(default_factory=list)
+
     # Per-turn flags, reset each turn
     was_sabotaged: bool = False
     press_caught_this_turn: bool = False
     partnership_formed_this_turn: List[str] = field(default_factory=list)
+    was_taken_over: bool = False
 
 
 @dataclass
@@ -48,6 +52,7 @@ class TurnResult:
     rewards: Dict[str, float]
     press_wire: List[Dict]   # all press releases this turn (for observation)
     emails: Dict[str, List[Dict]]  # per-recipient emails
+    spy_intel: Dict[str, List[Dict]] = field(default_factory=dict)  # owner → intercepted emails
 
 
 def resolve_turn(
@@ -60,14 +65,19 @@ def resolve_turn(
     rewards = {name: 0.0 for name in companies}
     press_wire: List[Dict] = []
     emails: Dict[str, List[Dict]] = {name: [] for name in companies}
+    spy_intel: Dict[str, List[Dict]] = {}
 
     # --- Reset per-turn flags ---
     for c in companies.values():
         c.was_sabotaged = False
         c.press_caught_this_turn = False
         c.partnership_formed_this_turn = []
+        c.was_taken_over = False
 
     # --- Phase 1: Communications (emails + press releases) ---
+    # Track outgoing emails per sender so spies can intercept them
+    outgoing_emails: Dict[str, List[Dict]] = {name: [] for name in companies}
+
     for name, action in actions.items():
         company = companies[name]
         if not company.alive:
@@ -81,7 +91,9 @@ def resolve_turn(
         for mail in action.private_emails:
             recipient = mail.get("to")
             if recipient and recipient in companies and companies[recipient].alive:
+                msg = {"from": name, "to": recipient, "text": mail.get("text", "")}
                 emails[recipient].append({"from": name, "text": mail.get("text", "")})
+                outgoing_emails[name].append(msg)
 
         # Process press release
         if action.press_release:
@@ -102,6 +114,18 @@ def resolve_turn(
                     "caught": False,
                 })
                 rewards[name] += 0.2
+
+    # Spy interception: companies with active spies see the target's outgoing emails
+    for spy_owner, company in companies.items():
+        if not company.alive or not company.has_spy_on:
+            continue
+        intercepted = []
+        for target_name in company.has_spy_on:
+            for msg in outgoing_emails.get(target_name, []):
+                intercepted.append(dict(msg))
+        if intercepted:
+            spy_intel[spy_owner] = intercepted
+        company.has_spy_on = []  # spy is single-use per turn
 
     # --- Phase 2: Strategic actions (resolved simultaneously) ---
     partnership_proposals: Dict[str, str] = {}  # proposer → target
@@ -142,6 +166,35 @@ def resolve_turn(
 
         elif action.action_type == "PARTNERSHIP" and action.action_target:
             partnership_proposals[name] = action.action_target
+
+        elif action.action_type == "HIRE_SPY" and action.action_target:
+            target = companies.get(action.action_target)
+            if target and target.alive:
+                company.cash -= 4_000_000
+                if rng.random() < 0.80:  # 80% success — spy planted
+                    company.has_spy_on.append(action.action_target)
+                    rewards[name] += 0.2
+                else:
+                    company.reputation = max(0.0, company.reputation - 0.15)
+                    rewards[name] -= 0.3
+
+        elif action.action_type == "HOSTILE_TAKEOVER" and action.action_target:
+            target = companies.get(action.action_target)
+            if target and target.alive:
+                company.cash -= 20_000_000
+                # Success rate scales with attacker cash advantage over target
+                cash_ratio = company.cash / max(target.cash, 1.0)
+                success_rate = min(0.70, 0.35 + cash_ratio * 0.10)
+                if rng.random() < success_rate:
+                    company.market_share += target.market_share
+                    target.market_share = 0.0
+                    target.alive = False
+                    target.was_taken_over = True
+                    rewards[name] += 1.5
+                    rewards[target.name] -= 1.5
+                else:
+                    company.reputation = max(0.0, company.reputation - 0.20)
+                    rewards[name] -= 0.5
 
     # --- Resolve partnerships (mutual proposals auto-accept; NPC 50% accept) ---
     processed = set()
@@ -213,7 +266,7 @@ def resolve_turn(
             rewards[name] -= 1.5
             _redistribute_market_share(company, companies)
 
-    return TurnResult(rewards=rewards, press_wire=press_wire, emails=emails)
+    return TurnResult(rewards=rewards, press_wire=press_wire, emails=emails, spy_intel=spy_intel)
 
 
 def _update_stock(company: CompanyState, press_wire: List[Dict], rng: random.Random) -> float:

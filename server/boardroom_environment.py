@@ -86,18 +86,30 @@ class BoardroomEnvironment(Environment):
         self._replay_log.append({
             "turn": self._turn,
             "actions": {
-                k: {"type": v.action_type, "target": v.action_target}
+                k: {
+                    "type": v.action_type,
+                    "target": v.action_target,
+                    "parse_failed": v.parse_failed,
+                }
                 for k, v in all_actions.items()
             },
+            "rewards": dict(result.rewards),
             "stats": {
                 k: {
-                    "cash": c.cash,
+                    "cash": round(c.cash, 0),
                     "stock": round(c.stock_price, 2),
                     "market_share": round(c.market_share, 2),
                     "reputation": round(c.reputation, 2),
                     "alive": c.alive,
                 }
                 for k, c in self._companies.items()
+            },
+            "press_wire": result.press_wire,
+            "emails": {
+                k: v for k, v in result.emails.items() if v
+            },
+            "spy_intel": {
+                k: v for k, v in result.spy_intel.items() if v
             },
         })
 
@@ -136,7 +148,7 @@ class BoardroomEnvironment(Environment):
                 target = None
                 parse_failed = True
 
-        if atype in ("SABOTAGE", "PARTNERSHIP") and not target:
+        if atype in ("SABOTAGE", "PARTNERSHIP", "HIRE_SPY", "HOSTILE_TAKEOVER") and not target:
             atype = "HOLD"
             parse_failed = True
 
@@ -156,9 +168,11 @@ class BoardroomEnvironment(Environment):
 
         if r < 0.15:
             atype, target = "EARNINGS_CALL", None
-        elif r < 0.35 and alive_others:
+        elif r < 0.20 and alive_others:
+            atype, target = "HIRE_SPY", self._rng.choice(alive_others)
+        elif r < 0.40 and alive_others:
             atype, target = "SABOTAGE", self._rng.choice(alive_others)
-        elif r < 0.45 and alive_others:
+        elif r < 0.50 and alive_others:
             atype, target = "PARTNERSHIP", self._rng.choice(alive_others)
         else:
             atype, target = "HOLD", None
@@ -217,9 +231,14 @@ class BoardroomEnvironment(Environment):
         )
 
         emails_received: List[Email] = []
+        intercepted_emails: List[Email] = []
         if self._last_turn_result:
             for mail in self._last_turn_result.emails.get(self.PRIMARY_CEO, []):
                 emails_received.append(Email(to=self.PRIMARY_CEO, text=f"From {mail['from']}: {mail['text']}"))
+            for mail in self._last_turn_result.spy_intel.get(self.PRIMARY_CEO, []):
+                intercepted_emails.append(
+                    Email(to=self.PRIMARY_CEO, text=f"[SPY] {mail['from']} → {mail['to']}: {mail['text']}")
+                )
 
         press_wire = self._last_turn_result.press_wire if self._last_turn_result else []
         active_partnerships = primary.active_partnerships if primary else []
@@ -230,6 +249,7 @@ class BoardroomEnvironment(Environment):
             leaderboard=leaderboard,
             active_partnerships=active_partnerships,
             emails_received=emails_received,
+            intercepted_emails=intercepted_emails,
             press_wire=press_wire,
             turn=self._turn,
             max_turns=self.MAX_TURNS,
@@ -242,6 +262,7 @@ class BoardroomEnvironment(Environment):
             your_stats=your_stats,
             all_companies=all_companies,
             emails_received=emails_received,
+            intercepted_emails=intercepted_emails,
             press_wire=press_wire,
             active_partnerships=active_partnerships,
             pending_partnership_proposals=[],
@@ -272,6 +293,7 @@ def _build_prompt(
     press_wire: List[Dict],
     turn: int,
     max_turns: int,
+    intercepted_emails: Optional[List] = None,
 ) -> str:
     if not primary:
         return "Game over."
@@ -310,6 +332,12 @@ def _build_prompt(
         for mail in emails_received:
             lines.append(f"  {mail.text[:200]}")
 
+    if intercepted_emails:
+        lines.append("")
+        lines.append("SPY INTEL (intercepted this turn):")
+        for mail in intercepted_emails:
+            lines.append(f"  {mail.text[:200]}")
+
     if press_wire:
         lines.append("")
         lines.append("PRESS WIRE THIS TURN:")
@@ -319,7 +347,13 @@ def _build_prompt(
 
     lines += [
         "",
-        "ACTIONS: EARNINGS_CALL | SABOTAGE <target> | PARTNERSHIP <target> | HOLD",
+        "ACTIONS:",
+        "  EARNINGS_CALL              — boost your stock price (no target needed)",
+        "  SABOTAGE <target>          — sabotage a rival (costs $5M, 70% success)",
+        "  PARTNERSHIP <target>       — propose alliance for mutual market share gains",
+        "  HIRE_SPY <target>          — plant a spy to intercept target's emails next turn (costs $4M, 80% success)",
+        "  HOSTILE_TAKEOVER <target>  — attempt to eliminate a rival and absorb their market share (costs $20M)",
+        "  HOLD                       — take no strategic action",
         "You may also send up to 2 private emails and 1 press release.",
         "",
         "Respond with ONLY valid JSON (no other text):",

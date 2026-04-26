@@ -31,8 +31,8 @@ class BoardroomAction(Action):
 
     private_emails: List[Email] = Field(default_factory=list)
     press_release: Optional[PressRelease] = None
-    action_type: Literal["EARNINGS_CALL", "SABOTAGE", "PARTNERSHIP", "HOLD"] = "HOLD"
-    action_target: Optional[str] = None  # target company name for SABOTAGE/PARTNERSHIP
+    action_type: Literal["EARNINGS_CALL", "SABOTAGE", "PARTNERSHIP", "HOLD", "HIRE_SPY", "HOSTILE_TAKEOVER"] = "HOLD"
+    action_target: Optional[str] = None  # target company name for SABOTAGE/PARTNERSHIP/HIRE_SPY/HOSTILE_TAKEOVER
 
 
 class BoardroomObservation(Observation):
@@ -44,6 +44,7 @@ class BoardroomObservation(Observation):
     your_stats: Optional[CompanyStats] = None
     all_companies: List[CompanyStats] = Field(default_factory=list)
     emails_received: List[Email] = Field(default_factory=list)
+    intercepted_emails: List[Email] = Field(default_factory=list)
     press_wire: List[Dict[str, Any]] = Field(default_factory=list)
     active_partnerships: List[str] = Field(default_factory=list)
     pending_partnership_proposals: List[str] = Field(default_factory=list)
