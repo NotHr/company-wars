@@ -201,6 +201,7 @@ def resolve_turn(
             companies[proposer].reputation = max(0.0, companies[proposer].reputation - 0.25)
             rewards[proposer] -= 0.5
             companies[proposer].market_share = max(0.0, companies[proposer].market_share - 1.0)
+            target.market_share += 1.0
             target.reputation = min(1.0, target.reputation + 0.05)
             rewards[target_name] += 0.15
             processed_mergers.add(target_name)
@@ -220,7 +221,9 @@ def resolve_turn(
         alive_partners = [p for p in company.active_partnerships
                           if companies.get(p) and companies[p].alive]
         if alive_partners:
-            rewards[name] += 0.1 * len(alive_partners)
+            trait = SECTOR_TRAITS.get(company.sector)
+            bonus_mult = trait.partnership_bonus_multiplier if trait else 1.0
+            rewards[name] += 0.1 * bonus_mult * len(alive_partners)
 
     # --- Phase 3: Economy update ---
     for name, company in companies.items():
