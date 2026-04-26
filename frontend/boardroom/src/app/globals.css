@@ -1,0 +1,277 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-inter);
+  --font-mono: var(--font-jetbrains);
+  --font-serif: var(--font-playfair);
+  --font-heading: var(--font-playfair);
+  --font-display: var(--font-display);
+
+  /* Boardroom palette (kept) */
+  --color-boardroom-obsidian: #000000;
+  --color-boardroom-mahogany: #2B1810;
+  --color-boardroom-midnight: #0A1929;
+  --color-boardroom-parchment: #F5E6D3;
+  --color-boardroom-gold: #D4AF37;
+  --color-boardroom-gold-dim: #8B7332;
+  --color-boardroom-blood: #8B0000;
+  --color-boardroom-ember: #F5A623;
+  --color-boardroom-emerald: #2D6A4F;
+  --color-boardroom-ash: #3A3A3A;
+
+  /* HUD palette (new — saturated, punchy) */
+  --color-hud-void: #000000;
+  --color-hud-bone: #F5F1E8;
+  --color-hud-danger: #FF2E4D;
+  --color-hud-warning: #FFB800;
+  --color-hud-success: #00D67A;
+  --color-hud-electric: #00E5FF;
+  --color-hud-royal: #FFD700;
+  --color-hud-ink: #0A0A0A;
+
+  /* CEO brand colors — SATURATED */
+  --color-ceo-vermillion: #FF0033;
+  --color-ceo-goldspire: #FFD700;
+  --color-ceo-sablemark: #A855F7;
+  --color-ceo-ironhold: #64748B;
+  --color-ceo-ashen: #FF6B2B;
+  --color-ceo-cobalt: #3B82F6;
+  --color-ceo-verdant: #00E676;
+
+  /* shadcn compat */
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+:root {
+  --background: #000000;
+  --foreground: #F5F1E8;
+  --card: #0A0A0A;
+  --card-foreground: #F5F1E8;
+  --popover: #0A0A0A;
+  --popover-foreground: #F5F1E8;
+  --primary: #FFD700;
+  --primary-foreground: #000000;
+  --secondary: #111;
+  --secondary-foreground: #F5F1E8;
+  --muted: #111;
+  --muted-foreground: #666;
+  --accent: #111;
+  --accent-foreground: #F5F1E8;
+  --destructive: #FF2E4D;
+  --border: rgba(255, 255, 255, 0.06);
+  --input: rgba(255, 255, 255, 0.06);
+  --ring: #FFD700;
+  --chart-1: #FF0033;
+  --chart-2: #FFD700;
+  --chart-3: #A855F7;
+  --chart-4: #64748B;
+  --chart-5: #3B82F6;
+  --radius: 0.25rem;
+  --sidebar: #0A0A0A;
+  --sidebar-foreground: #F5F1E8;
+  --sidebar-primary: #FFD700;
+  --sidebar-primary-foreground: #000000;
+  --sidebar-accent: #111;
+  --sidebar-accent-foreground: #F5F1E8;
+  --sidebar-border: rgba(255,255,255,0.06);
+  --sidebar-ring: #FFD700;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    background: #000;
+    color: #F5F1E8;
+    margin: 0;
+    padding: 0;
+    overflow-x: hidden;
+    overflow-y: auto !important;
+    min-height: 100vh;
+  }
+  html {
+    @apply font-sans;
+    scroll-behavior: smooth;
+    overflow-y: auto !important;
+    height: auto !important;
+  }
+}
+
+/* ============================================================
+   SCANLINES — THE GAME-HUD FEEL
+   ============================================================ */
+.scanlines::before {
+  content: '';
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(0, 229, 255, 0.015) 0px,
+    rgba(0, 229, 255, 0.015) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+  pointer-events: none;
+  z-index: 9999;
+}
+
+/* ============================================================
+   KEYFRAMES
+   ============================================================ */
+@keyframes marquee {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+@keyframes glitch {
+  0%, 100% { transform: translate(0); filter: none; }
+  20% { transform: translate(-3px, 2px); filter: hue-rotate(90deg); }
+  40% { transform: translate(3px, -2px); filter: hue-rotate(-90deg); }
+  60% { transform: translate(-2px, -1px); filter: hue-rotate(180deg); }
+  80% { transform: translate(2px, 1px); filter: hue-rotate(-45deg); }
+}
+.glitching { animation: glitch 0.6s steps(8); }
+
+@keyframes pulse-ring {
+  0% { transform: scale(1); opacity: 0.6; }
+  100% { transform: scale(1.8); opacity: 0; }
+}
+
+@keyframes sigil-rotate {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@keyframes sigil-counter-rotate {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(-360deg); }
+}
+
+@keyframes ambient-breathe {
+  0%, 100% { opacity: 0.3; transform: translate(-50%, -50%) scale(1); }
+  50% { opacity: 0.7; transform: translate(-50%, -50%) scale(1.05); }
+}
+
+@keyframes particle-drift {
+  0% { transform: translate(0, 0); opacity: 0.15; }
+  50% { opacity: 0.35; }
+  100% { transform: translate(20px, -15px); opacity: 0.1; }
+}
+
+.sigil-pulse {
+  animation: sigil-glow-pulse 3s ease-in-out infinite;
+}
+
+@keyframes sigil-glow-pulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 0.9; }
+}
+
+@keyframes digit-roll {
+  0% { transform: translateY(100%); opacity: 0; }
+  30% { opacity: 1; }
+  100% { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes stamp-slam {
+  0% { transform: translate(-50%, -50%) rotate(-12deg) scale(2); opacity: 0; }
+  60% { transform: translate(-50%, -50%) rotate(-12deg) scale(0.95); opacity: 1; }
+  100% { transform: translate(-50%, -50%) rotate(-12deg) scale(1); opacity: 0.85; }
+}
+
+/* ============================================================
+   GOLD SHIMMER TEXT
+   ============================================================ */
+.gold-text {
+  background: linear-gradient(135deg, #FFD700 0%, #FFF1A8 40%, #FFD700 60%, #B8962E 100%);
+  background-size: 300% auto;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: gold-shimmer 6s ease-in-out infinite;
+}
+@keyframes gold-shimmer {
+  0% { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+
+@keyframes fadeIn {
+  0% { opacity: 0; transform: translateY(4px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes ceo-shake {
+  0%, 100% { transform: translate(-50%, -50%) translate(0, 0); }
+  20% { transform: translate(-50%, -50%) translate(-3px, 2px); }
+  40% { transform: translate(-50%, -50%) translate(3px, -1px); }
+  60% { transform: translate(-50%, -50%) translate(-2px, -2px); }
+  80% { transform: translate(-50%, -50%) translate(2px, 1px); }
+}
+
+@keyframes spotPulse {
+  0%, 100% { box-shadow: 0 0 20px var(--spot-color, #FFD700), 0 0 40px color-mix(in srgb, var(--spot-color, #FFD700) 30%, transparent); }
+  50% { box-shadow: 0 0 40px var(--spot-color, #FFD700), 0 0 80px color-mix(in srgb, var(--spot-color, #FFD700) 40%, transparent); }
+}
+
+@keyframes comms-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+/* Comms log terminal cursor */
+.comms-cursor::after {
+  content: '\2588';
+  animation: comms-blink 1s step-end infinite;
+  color: #00E676;
+  margin-left: 2px;
+}
+
+/* ============================================================
+   SCROLLBAR
+   ============================================================ */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,215,0,0.15); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,215,0,0.3); }
