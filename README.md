@@ -129,6 +129,8 @@ The reward function passes `env_reward` from the rollout through kwargs — no r
 
 Full training logs: **[W&B Report](https://api.wandb.ai/links/me-harshithreddy-gitam/xnb97tdo)**
 
+![Training curves](media/reward_curve.png)
+
 ### Training metrics (1181 steps, L40S)
 
 | Metric | Initial | Final | Best |
@@ -159,6 +161,22 @@ Key observations:
 | Rank distribution | 20× rank-1, 0× rank-2, 1× rank-3 |
 
 > Opponents are heuristic random agents. Next step: self-play where all 7 companies run the trained model.
+
+---
+
+## Frontend
+
+Bloomberg Terminal–style web UI. Each turn updates live with stock prices, transmissions, alliance status, and event log. Betrayals and hostile takeovers get cinematic full-screen moments.
+
+| | |
+|---|---|
+| ![Early game](media/ui_early.png) | ![Market view](media/ui_market.png) |
+| Turn 2 — alliances forming in background | Turn 6 — stock price divergence across all 7 |
+| ![Betrayal](media/ui_betrayal.png) | ![Intel feed](media/ui_main.png) |
+| Turn 5 — BETRAYAL, partner dumps shared IP | Turn 8 — intercepted transmissions, bankruptcy |
+
+![Hostile takeover](media/ui_takeover.png)
+*Turn 9 — hostile takeover, CEO ousted from her own company*
 
 ---
 
